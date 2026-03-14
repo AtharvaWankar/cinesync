@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <title>CineSync — {{ movie_name }}</title>
+  <link rel="stylesheet" href="/static/css/style.css"/>
+</head>
+<body class="watch-body">
+
+<!-- Name prompt overlay -->
+<div id="name-overlay" class="overlay">
+  <div class="overlay-box">
+    <div class="logo">🎬 CineSync</div>
+    <h2>Welcome to the Watch Party</h2>
+    <p>Enter your name so the host knows you've joined.</p>
+    <input type="text" id="viewer-name-input" placeholder="Your name" maxlength="30"
+           onkeydown="if(event.key==='Enter') joinParty()"/>
+    <button class="btn btn-primary" onclick="joinParty()">Join Party</button>
+  </div>
+</div>
+
+<!-- Main watch layout -->
+<div class="watch-container" id="watch-container" style="display:none">
+
+  <!-- Video -->
+  <div class="video-wrap">
+    <video id="viewer-video" src="/video" preload="metadata">
+      Your browser does not support HTML5 video.
+    </video>
+    <div id="sync-overlay" class="sync-overlay" style="display:none">
+      <div class="spinner"></div>
+      <span>Syncing...</span>
+    </div>
+  </div>
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <span class="logo-small">🎬 CineSync</span>
+      <span id="viewer-count-badge">0 watching</span>
+    </div>
+
+    <div class="movie-title" id="movie-title">{{ movie_name }}</div>
+
+    <!-- Viewer list -->
+    <div class="viewer-section">
+      <div class="section-label">In this party</div>
+      <div id="viewer-list" class="viewer-list-side"></div>
+    </div>
+
+    <!-- Chat -->
+    <div class="chat-section">
+      <div class="section-label">Chat</div>
+      <div id="chat-messages" class="chat-messages"></div>
+      <div class="chat-input-row">
+        <input type="text" id="chat-input" placeholder="React..." maxlength="300"
+               onkeydown="if(event.key==='Enter') sendChat()"/>
+        <button class="btn btn-secondary btn-sm" onclick="sendChat()">→</button>
+      </div>
+    </div>
+
+  </aside>
+</div>
+
+<script src="/static/js/socket-client.js"></script>
+<script src="/static/js/viewer.js"></script>
+</body>
+</html>

@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <title>CineSync — Host Panel</title>
+  <link rel="stylesheet" href="/static/css/style.css"/>
+</head>
+<body class="host-body">
+
+<div class="host-container">
+
+  <!-- Header -->
+  <header class="host-header">
+    <div class="logo">🎬 CineSync</div>
+    <div class="badge" id="status-badge">● Idle</div>
+  </header>
+
+  <!-- Step 1: Load Movie -->
+  <section class="card" id="card-load">
+    <h2>① Load Movie</h2>
+    <p class="hint">Paste the full path to the movie file on this PC.</p>
+    <div class="path-row">
+      <input type="text" id="movie-path" placeholder="e.g. C:\Movies\Inception.mp4" spellcheck="false"/>
+      <button class="btn btn-primary" onclick="loadMovie()">Load</button>
+    </div>
+    <div id="load-status" class="status-msg"></div>
+  </section>
+
+  <!-- Step 2: Share URL -->
+  <section class="card" id="card-share">
+    <h2>② Share Watch URL</h2>
+    <p class="hint">Send this link to your friends. They need Tailscale running.</p>
+    <div class="url-row">
+      <input type="text" id="watch-url" value="{{ watch_url }}" readonly/>
+      <button class="btn btn-secondary" onclick="copyURL()">Copy</button>
+    </div>
+    <div id="copy-status" class="status-msg"></div>
+
+    {% if not tailscale_ip %}
+    <div class="warning-box">
+      ⚠️ Tailscale IP not detected. Make sure Tailscale is running on this machine.
+    </div>
+    {% endif %}
+  </section>
+
+  <!-- Step 3: Viewers -->
+  <section class="card" id="card-viewers">
+    <h2>③ Viewers Connected</h2>
+    <div class="viewer-count"><span id="viewer-count">0</span> connected</div>
+    <div id="viewer-list" class="viewer-list"></div>
+  </section>
+
+  <!-- Step 4: Controls -->
+  <section class="card" id="card-controls">
+    <h2>④ Playback Controls</h2>
+    <p class="hint" id="movie-loaded-name">No movie loaded yet.</p>
+
+    <div class="controls-row">
+      <button class="btn btn-play" id="btn-play" onclick="hostPlay()" disabled>▶ Play</button>
+      <button class="btn btn-pause" id="btn-pause" onclick="hostPause()" disabled>⏸ Pause</button>
+    </div>
+
+    <!-- Timeline -->
+    <div class="timeline-wrap">
+      <span id="current-time">0:00</span>
+      <input type="range" id="timeline" min="0" max="100" value="0"
+             oninput="onTimelineDrag(this.value)"
+             onchange="onTimelineSeek(this.value)"
+             disabled/>
+      <span id="total-time">0:00</span>
+    </div>
+
+    <!-- Host's own video (hidden, used to drive sync) -->
+    <video id="host-video" src="/video" style="display:none"
+           onloadedmetadata="onVideoLoaded()"
+           ontimeupdate="onTimeUpdate()">
+    </video>
+  </section>
+
+  <!-- Chat -->
+  <section class="card" id="card-chat">
+    <h2>💬 Chat</h2>
+    <div id="chat-messages" class="chat-messages"></div>
+    <div class="chat-input-row">
+      <input type="text" id="chat-input" placeholder="Say something..." maxlength="300"
+             onkeydown="if(event.key==='Enter') sendChat()"/>
+      <button class="btn btn-secondary" onclick="sendChat()">Send</button>
+    </div>
+  </section>
+
+</div>
+
+<script src="/static/js/socket-client.js"></script>
+<script src="/static/js/host.js"></script>
+</body>
+</html>
