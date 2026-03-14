@@ -26,6 +26,18 @@
     <div id="load-status" class="status-msg"></div>
   </section>
 
+  <!-- Step 1b: Load Subtitles (optional) -->
+  <section class="card" id="card-subtitles">
+    <h2>① Subtitles <span class="optional-tag">optional</span></h2>
+    <p class="hint">Paste the full path to a .srt subtitle file.</p>
+    <div class="path-row">
+      <input type="text" id="subtitle-path" placeholder="e.g. C:\Movies\Inception.en.srt" spellcheck="false"/>
+      <button class="btn btn-secondary" onclick="loadSubtitles()">Load</button>
+      <button class="btn btn-secondary" onclick="clearSubtitles()">Clear</button>
+    </div>
+    <div id="subtitle-status" class="status-msg"></div>
+  </section>
+
   <!-- Step 2: Share URL -->
   <section class="card" id="card-share">
     <h2>② Share Watch URL</h2>
@@ -70,10 +82,11 @@
       <span id="total-time">0:00</span>
     </div>
 
-    <!-- Host's own video (hidden, used to drive sync) -->
+    <!-- Host's own video (hidden, drives sync) -->
     <video id="host-video" src="/video" style="display:none"
            onloadedmetadata="onVideoLoaded()"
            ontimeupdate="onTimeUpdate()">
+      <track id="host-track" kind="subtitles" src="/subtitles" srclang="en" label="Subtitles" default/>
     </video>
   </section>
 
@@ -90,13 +103,6 @@
 
 </div>
 
-<!-- <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script> -->
-<!-- <script src="/socket.io/socket.io.js"></script> -->
-<!-- <script src="/static/js/socket-client.js"></script> -->
-<!-- <script src="/static/js/host.js"></script> -->
-
-
-
 <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
 <script>
   const socket = io({
@@ -105,14 +111,10 @@
     reconnectionDelay: 1500,
     transports: ["polling", "websocket"],
   });
-
   socket.on("connect", () => console.log("[Socket] Connected:", socket.id));
   socket.on("disconnect", (r) => console.warn("[Socket] Disconnected:", r));
   socket.on("connect_error", (e) => console.error("[Socket] Error:", e.message));
 </script>
 <script src="/static/js/host.js"></script>
-
-
-
 </body>
 </html>

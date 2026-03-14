@@ -25,8 +25,23 @@
   <!-- Video -->
   <div class="video-wrap">
     <video id="viewer-video" src="/video" preload="metadata">
+      {% if has_subtitles %}
+      <track kind="subtitles" src="/subtitles" srclang="en" label="Subtitles" default/>
+      {% endif %}
       Your browser does not support HTML5 video.
     </video>
+
+    <!-- Viewer controls bar -->
+    <div class="viewer-controls">
+      <button class="ctrl-btn" id="v-btn-play" onclick="viewerPlay()">▶</button>
+      <button class="ctrl-btn" id="v-btn-pause" onclick="viewerPause()">⏸</button>
+      <span id="v-current-time" class="time-display">0:00</span>
+      <input type="range" id="v-timeline" min="0" max="100" value="0"
+             oninput="onViewerTimelineDrag(this.value)"
+             onchange="onViewerTimelineSeek(this.value)"/>
+      <span id="v-total-time" class="time-display">0:00</span>
+    </div>
+
     <div id="sync-overlay" class="sync-overlay" style="display:none">
       <div class="spinner"></div>
       <span>Syncing...</span>
@@ -62,26 +77,18 @@
   </aside>
 </div>
 
-<!-- <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script> -->
-<!-- <script src="/socket.io/socket.io.js"></script> -->
-<!-- <script src="/static/js/socket-client.js"></script> -->
-<!-- <script src="/static/js/viewer.js"></script> -->
-
 <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
 <script>
-  // Inline socket creation — guarantees socket exists before viewer.js runs
   const socket = io({
     reconnection: true,
     reconnectionAttempts: 10,
     reconnectionDelay: 1500,
     transports: ["polling", "websocket"],
   });
-
   socket.on("connect", () => console.log("[Socket] Connected:", socket.id));
   socket.on("disconnect", (r) => console.warn("[Socket] Disconnected:", r));
   socket.on("connect_error", (e) => console.error("[Socket] Error:", e.message));
 </script>
 <script src="/static/js/viewer.js"></script>
-
 </body>
 </html>

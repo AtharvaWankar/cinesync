@@ -6,9 +6,10 @@ class PartyState:
     All values are updated by sync_server and read by templates/clients.
     """
     def __init__(self):
-        self._lock = threading.Lock()
+        self._lock        = threading.Lock()
         self.movie_path   = None   # Absolute path to movie file on host disk
         self.movie_name   = None   # Just the filename for display
+        self.subtitle_path = None  # Absolute path to .srt file (optional)
         self.is_playing   = False
         self.timestamp    = 0.0    # Current playback position in seconds
         self.viewers      = {}     # { sid: { "name": str } }
@@ -19,6 +20,15 @@ class PartyState:
         with self._lock:
             self.movie_path = path
             self.movie_name = path.split("\\")[-1].split("/")[-1]
+
+    # ── Subtitles ──────────────────────────────────────────────────────
+    def set_subtitle(self, path: str):
+        with self._lock:
+            self.subtitle_path = path
+
+    def clear_subtitle(self):
+        with self._lock:
+            self.subtitle_path = None
 
     # ── Playback ───────────────────────────────────────────────────────
     def play(self, timestamp: float):
@@ -54,9 +64,10 @@ class PartyState:
     def snapshot(self) -> dict:
         with self._lock:
             return {
-                "timestamp":  self.timestamp,
-                "is_playing": self.is_playing,
-                "movie_name": self.movie_name,
+                "timestamp":    self.timestamp,
+                "is_playing":   self.is_playing,
+                "movie_name":   self.movie_name,
+                "has_subtitles": self.subtitle_path is not None,
             }
 
 

@@ -80,3 +80,7 @@ def register_events(socketio: SocketIO):
     @socketio.on("ping_alive")
     def on_ping():
         emit("pong_alive")
+
+    @socketio.on("subtitles_updated")
+    def on_subtitles_updated():
+        socketio.emit("subtitles_updated", room=ROOM)
