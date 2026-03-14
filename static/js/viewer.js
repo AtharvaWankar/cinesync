@@ -1,15 +1,13 @@
-/**
- * viewer.js — Viewer watch page logic
- * Receives sync events from host and keeps the video in lockstep.
- */
+const video   = document.getElementById("viewer-video");
+const overlay = document.getElementById("sync-overlay");
+const vTimeline    = document.getElementById("v-timeline");
+const vCurrentTime = document.getElementById("v-current-time");
+const vTotalTime   = document.getElementById("v-total-time");
 
-const video    = document.getElementById("viewer-video");
-const overlay  = document.getElementById("sync-overlay");
-let viewerName = "";
-let isSyncing  = false;
-
-// ── Tolerance: if we're within this many seconds, don't re-seek ───────
-const SYNC_TOLERANCE = 1.5; // seconds
+let viewerName  = "";
+let isDragging  = false;
+let isSyncing   = false;
+const SYNC_TOLERANCE = 1.5;
 
 // ── Join party ─────────────────────────────────────────────────────────
 
@@ -21,22 +19,68 @@ function joinParty() {
   viewerName = name;
   socket.emit("viewer_join", { name });
 
-  // Show main UI
-  document.getElementById("name-overlay").style.display  = "none";
+  document.getElementById("name-overlay").style.display   = "none";
   document.getElementById("watch-container").style.display = "grid";
+}
+
+// ── Utilities ──────────────────────────────────────────────────────────
+
+function formatTime(secs) {
+  const s = Math.floor(secs);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  if (h > 0) return `${h}:${String(m).padStart(2,"0")}:${String(sec).padStart(2,"0")}`;
+  return `${m}:${String(sec).padStart(2,"0")}`;
+}
+
+function escHtml(str) {
+  return str.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
+
+// ── Video metadata loaded ──────────────────────────────────────────────
+
+video.addEventListener("loadedmetadata", () => {
+  vTimeline.max = Math.floor(video.duration);
+  vTotalTime.textContent = formatTime(video.duration);
+});
+
+// ── Timeline update while playing ─────────────────────────────────────
+
+video.addEventListener("timeupdate", () => {
+  if (isDragging) return;
+  vTimeline.value = Math.floor(video.currentTime);
+  vCurrentTime.textContent = formatTime(video.currentTime);
+});
+
+// ── Viewer controls — emit to server, server broadcasts to everyone ────
+
+function viewerPlay() {
+  video.play();
+  socket.emit("host_play", { timestamp: video.currentTime });
+}
+
+function viewerPause() {
+  video.pause();
+  socket.emit("host_pause", { timestamp: video.currentTime });
+}
+
+function onViewerTimelineDrag(val) {
+  isDragging = true;
+  vCurrentTime.textContent = formatTime(Number(val));
+}
+
+function onViewerTimelineSeek(val) {
+  isDragging = false;
+  const ts = Number(val);
+  video.currentTime = ts;
+  socket.emit("host_seek", { timestamp: ts });
 }
 
 // ── Sync helpers ───────────────────────────────────────────────────────
 
-function showSyncOverlay() {
-  overlay.style.display = "flex";
-  isSyncing = true;
-}
-
-function hideSyncOverlay() {
-  overlay.style.display = "none";
-  isSyncing = false;
-}
+function showSyncOverlay() { overlay.style.display = "flex"; isSyncing = true; }
+function hideSyncOverlay() { overlay.style.display = "none";  isSyncing = false; }
 
 function seekIfNeeded(ts) {
   if (Math.abs(video.currentTime - ts) > SYNC_TOLERANCE) {
@@ -44,31 +88,21 @@ function seekIfNeeded(ts) {
   }
 }
 
-// ── Socket: initial state when joining mid-movie ───────────────────────
+// ── Socket: initial state on join ─────────────────────────────────────
 
 socket.on("sync_state", (data) => {
   video.currentTime = data.timestamp;
   if (data.is_playing) {
-    video.play().catch(() => {
-      // Browser blocked autoplay — user hasn't interacted yet
-      // The name-overlay click should have unlocked it, but just in case:
-      showSyncOverlay();
-    });
+    video.play().catch(() => showSyncOverlay());
   }
 });
 
-// ── Socket: host pressed Play ──────────────────────────────────────────
+// ── Socket: play / pause / seek from anyone ────────────────────────────
 
 socket.on("sync_play", (data) => {
   seekIfNeeded(data.timestamp);
-  video.play().then(() => {
-    hideSyncOverlay();
-  }).catch(() => {
-    showSyncOverlay();
-  });
+  video.play().then(() => hideSyncOverlay()).catch(() => showSyncOverlay());
 });
-
-// ── Socket: host pressed Pause ────────────────────────────────────────
 
 socket.on("sync_pause", (data) => {
   video.pause();
@@ -76,55 +110,40 @@ socket.on("sync_pause", (data) => {
   hideSyncOverlay();
 });
 
-// ── Socket: host seeked ────────────────────────────────────────────────
-
 socket.on("sync_seek", (data) => {
   showSyncOverlay();
   video.currentTime = data.timestamp;
 });
 
-// ── Socket: viewer list updated ────────────────────────────────────────
+// ── Socket: subtitles updated by host ─────────────────────────────────
+
+socket.on("subtitles_updated", () => {
+  // Remove old track and add fresh one so browser reloads it
+  const existing = video.querySelector("track");
+  if (existing) existing.remove();
+
+  const track = document.createElement("track");
+  track.kind    = "subtitles";
+  track.src     = "/subtitles?" + Date.now();
+  track.srclang = "en";
+  track.label   = "Subtitles";
+  track.default = true;
+  video.appendChild(track);
+});
+
+// ── Socket: viewer list + chat ─────────────────────────────────────────
 
 socket.on("viewer_update", (data) => {
-  document.getElementById("viewer-count-badge").textContent =
-    `${data.count} watching`;
-
+  document.getElementById("viewer-count-badge").textContent = `${data.count} watching`;
   const list = document.getElementById("viewer-list");
   list.innerHTML = data.viewers.map(n =>
     `<div class="viewer-item">${escHtml(n)}</div>`
   ).join("");
 });
 
-// ── Socket: chat ───────────────────────────────────────────────────────
-
 socket.on("chat_message", (data) => {
   appendChat(data.name, data.text);
 });
-
-// ── Video events ───────────────────────────────────────────────────────
-
-video.addEventListener("waiting", () => {
-  // Browser is buffering — show overlay
-  showSyncOverlay();
-});
-
-video.addEventListener("playing", () => {
-  hideSyncOverlay();
-});
-
-video.addEventListener("canplay", () => {
-  if (!isSyncing) hideSyncOverlay();
-});
-
-// ── Chat ───────────────────────────────────────────────────────────────
-
-function sendChat() {
-  const input = document.getElementById("chat-input");
-  const text  = input.value.trim();
-  if (!text || !viewerName) return;
-  socket.emit("chat_message", { name: viewerName, text });
-  input.value = "";
-}
 
 function appendChat(name, text) {
   const box = document.getElementById("chat-messages");
@@ -135,13 +154,11 @@ function appendChat(name, text) {
   box.scrollTop = box.scrollHeight;
 }
 
-function escHtml(str) {
-  return str.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
-}
+// ── Video buffering events ─────────────────────────────────────────────
+
+video.addEventListener("waiting", () => showSyncOverlay());
+video.addEventListener("playing", () => hideSyncOverlay());
+video.addEventListener("canplay", () => { if (!isSyncing) hideSyncOverlay(); });
 
 // ── Heartbeat ──────────────────────────────────────────────────────────
-// Lets the server know this viewer is still alive every 30s
-
-setInterval(() => {
-  socket.emit("ping_alive");
-}, 30000);
+setInterval(() => socket.emit("ping_alive"), 30000);
