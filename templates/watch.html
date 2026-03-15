@@ -33,13 +33,20 @@
 
     <!-- Viewer controls bar -->
     <div class="viewer-controls">
-      <button class="ctrl-btn" id="v-btn-play" onclick="viewerPlay()">▶</button>
-      <button class="ctrl-btn" id="v-btn-pause" onclick="viewerPause()">⏸</button>
+      <button class="ctrl-btn ctrl-btn--toggle" id="v-btn-toggle" onclick="viewerToggle()">▶</button>
       <span id="v-current-time" class="time-display">0:00</span>
-      <input type="range" id="v-timeline" min="0" max="100" value="0"
+      <input type="range" id="v-timeline" min="0" max="100" value="0" step="10"
              oninput="onViewerTimelineDrag(this.value)"
              onchange="onViewerTimelineSeek(this.value)"/>
       <span id="v-total-time" class="time-display">0:00</span>
+      <div class="vol-wrap">
+  <span class="vol-icon" onclick="toggleMute()">🔊</span>
+  <div class="vol-slider-wrap">
+    <input type="range" id="v-volume" min="0" max="100" value="100" step="1"
+           oninput="onVolumeChange(this.value)"/>
+  </div>
+  <div id="vol-toast" class="vol-toast"></div>
+</div>
     </div>
 
     <div id="sync-overlay" class="sync-overlay" style="display:none">
@@ -49,36 +56,60 @@
   </div>
 
   <!-- Sidebar -->
-  <aside class="sidebar">
-    <div class="sidebar-header">
-      <span class="logo-small">🎬 CineSync</span>
-      <span id="viewer-count-badge">0 watching</span>
-    </div>
+  <aside class="sidebar" id="sidebar">
 
-    <div class="movie-title" id="movie-title">{{ movie_name }}</div>
+    <!-- Collapse toggle button -->
+    <button class="sidebar-toggle" id="sidebar-toggle" onclick="toggleSidebar()" title="Toggle chat">
+      <span id="toggle-icon">»</span>
+    </button>
 
-    <!-- Viewer list -->
-    <div class="viewer-section">
-      <div class="section-label">In this party</div>
-      <div id="viewer-list" class="viewer-list-side"></div>
-    </div>
+    <div class="sidebar-inner" id="sidebar-inner">
+      <div class="sidebar-header">
+        <span class="logo-small">🎬 CineSync</span>
+        <span id="viewer-count-badge">0 watching</span>
+      </div>
 
-    <!-- Chat -->
-    <div class="chat-section">
-      <div class="section-label">Chat</div>
-      <div id="chat-messages" class="chat-messages"></div>
-      <div class="chat-input-row">
-        <input type="text" id="chat-input" placeholder="React..." maxlength="300"
-               onkeydown="if(event.key==='Enter') sendChat()"/>
-        <button class="btn btn-secondary btn-sm" onclick="sendChat()">→</button>
+      <div class="movie-title" id="movie-title">{{ movie_name }}</div>
+
+      <!-- Viewer list -->
+      <div class="viewer-section">
+        <div class="section-label">In this party</div>
+        <div id="viewer-list" class="viewer-list-side"></div>
+      </div>
+
+      <!-- Chat -->
+      <div class="chat-section">
+        <div class="section-label">Chat</div>
+        <div id="chat-messages" class="chat-messages"></div>
+        <div id="typing-indicator" class="typing-indicator"></div>
+        <div class="chat-input-row">
+          <input type="text" id="chat-input" placeholder="React..." maxlength="300"
+                 onkeydown="if(event.key==='Enter') sendChat()"
+                 oninput="onChatInput()"/>
+          <button class="btn btn-secondary btn-sm" onclick="sendChat()">→</button>
+        </div>
       </div>
     </div>
 
   </aside>
-</div>
+
+  <!-- Seek toast -->
+  <div id="seek-toast" class="seek-toast"></div>
+
+  <!-- Seek toast -->
+  <div id="seek-toast" class="seek-toast"></div>
+
+</div><!-- end watch-container -->
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
 <script>
+  function toggleSidebar() {
+    const container = document.getElementById("watch-container");
+    const icon      = document.getElementById("toggle-icon");
+    const isCollapsed = container.classList.toggle("sidebar-collapsed");
+    icon.textContent = isCollapsed ? "«" : "»";
+  }
+
   const socket = io({
     reconnection: true,
     reconnectionAttempts: 10,

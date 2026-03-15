@@ -2,6 +2,8 @@ import os
 import re
 import webbrowser
 import threading
+import tkinter as tk
+from tkinter import filedialog
 from flask import Flask, render_template, request, jsonify, Response, abort
 from flask_socketio import SocketIO
 
@@ -98,6 +100,65 @@ def load_subtitles():
     return jsonify({"ok": True})
 
 
+@app.route("/api/browse_movie")
+def browse_movie():
+    """Open native Windows file picker, return the selected path."""
+    root = tk.Tk()
+    root.withdraw()
+    root.wm_attributes("-topmost", True)
+
+    path = filedialog.askopenfilename(
+        title="Select Movie File",
+        filetypes=[
+            ("Video files", "*.mp4 *.mkv *.avi *.mov *.webm"),
+            ("All files", "*.*"),
+        ]
+    )
+    root.destroy()
+
+    if not path:
+        return jsonify({"ok": False, "cancelled": True})
+
+    ext = os.path.splitext(path)[1].lower()
+    if ext not in SUPPORTED_FORMATS:
+        return jsonify({
+            "ok": False,
+            "error": f"Unsupported format '{ext}'. Supported: {', '.join(SUPPORTED_FORMATS.keys())}"
+        }), 400
+
+    state.set_movie(path)
+    state.party_active = True
+    print(f"[MOVIE] Loaded: {path}")
+    return jsonify({"ok": True, "movie_name": state.movie_name, "path": path})
+
+
+@app.route("/api/browse_subtitle")
+def browse_subtitle():
+    """Open native Windows file picker for .srt files."""
+    root = tk.Tk()
+    root.withdraw()
+    root.wm_attributes("-topmost", True)
+
+    path = filedialog.askopenfilename(
+        title="Select Subtitle File",
+        filetypes=[
+            ("Subtitle files", "*.srt"),
+            ("All files", "*.*"),
+        ]
+    )
+    root.destroy()
+
+    if not path:
+        return jsonify({"ok": False, "cancelled": True})
+
+    if not path.lower().endswith(".srt"):
+        return jsonify({"ok": False, "error": "Only .srt files are supported."}), 400
+
+    state.set_subtitle(path)
+    print(f"[SUBS]  Loaded: {path}")
+    return jsonify({"ok": True, "path": path})
+
+
 @app.route("/subtitles")
 def serve_subtitles():
     """
@@ -117,9 +178,7 @@ def serve_subtitles():
 
 def srt_to_vtt(srt: str) -> str:
     """Convert SRT subtitle format to WebVTT format in memory."""
-    # Replace SRT timestamp separator , → .
     vtt = re.sub(r"(\d{2}:\d{2}:\d{2}),(\d{3})", r"\1.\2", srt)
-    # Strip Windows line endings
     vtt = vtt.replace("\r\n", "\n").replace("\r", "\n")
     return "WEBVTT\n\n" + vtt.strip()
 
@@ -165,5 +224,3 @@ if __name__ == "__main__":
 
     threading.Thread(target=open_host_browser, daemon=True).start()
     socketio.run(app, host=HOST, port=PORT, debug=False)
-
-    

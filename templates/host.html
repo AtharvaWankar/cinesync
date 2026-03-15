@@ -18,9 +18,10 @@
   <!-- Step 1: Load Movie -->
   <section class="card" id="card-load">
     <h2>① Load Movie</h2>
-    <p class="hint">Paste the full path to the movie file on this PC.</p>
+    <p class="hint">Click Browse to pick a video file, or paste the full path manually.</p>
     <div class="path-row">
       <input type="text" id="movie-path" placeholder="e.g. C:\Movies\Inception.mp4" spellcheck="false"/>
+      <button class="btn btn-secondary" onclick="browseMovie()">Browse</button>
       <button class="btn btn-primary" onclick="loadMovie()">Load</button>
     </div>
     <div id="load-status" class="status-msg"></div>
@@ -29,9 +30,10 @@
   <!-- Step 1b: Load Subtitles (optional) -->
   <section class="card" id="card-subtitles">
     <h2>① Subtitles <span class="optional-tag">optional</span></h2>
-    <p class="hint">Paste the full path to a .srt subtitle file.</p>
+    <p class="hint">Click Browse to pick a .srt file, or paste the full path manually.</p>
     <div class="path-row">
       <input type="text" id="subtitle-path" placeholder="e.g. C:\Movies\Inception.en.srt" spellcheck="false"/>
+      <button class="btn btn-secondary" onclick="browseSubtitle()">Browse</button>
       <button class="btn btn-secondary" onclick="loadSubtitles()">Load</button>
       <button class="btn btn-secondary" onclick="clearSubtitles()">Clear</button>
     </div>

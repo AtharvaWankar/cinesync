@@ -31,7 +31,60 @@ function setBadge(text, active = false) {
   el.className = active ? "badge active" : "badge";
 }
 
-// ── Load Movie ─────────────────────────────────────────────────────────
+// ── Native File Browser ────────────────────────────────────────────────
+
+async function browseMovie() {
+  setStatus("load-status", "Opening file browser...", "");
+  try {
+    const res  = await fetch("/api/browse_movie");
+    const data = await res.json();
+
+    if (data.cancelled) {
+      setStatus("load-status", "", "");
+      return;
+    }
+    if (data.ok) {
+      document.getElementById("movie-path").value = data.path;
+      setStatus("load-status", `✓ Loaded: ${data.movie_name}`, "ok");
+      document.getElementById("movie-loaded-name").textContent = `🎬 ${data.movie_name}`;
+      enableControls();
+      movieLoaded = true;
+      setBadge("● Party Active", true);
+      video.src = "/video";
+      video.load();
+    } else {
+      setStatus("load-status", `✗ ${data.error}`, "error");
+    }
+  } catch (e) {
+    setStatus("load-status", "✗ Server error.", "error");
+  }
+}
+
+async function browseSubtitle() {
+  setStatus("subtitle-status", "Opening file browser...", "");
+  try {
+    const res  = await fetch("/api/browse_subtitle");
+    const data = await res.json();
+
+    if (data.cancelled) {
+      setStatus("subtitle-status", "", "");
+      return;
+    }
+    if (data.ok) {
+      document.getElementById("subtitle-path").value = data.path;
+      setStatus("subtitle-status", "✓ Subtitles loaded!", "ok");
+      const track = document.getElementById("host-track");
+      if (track) { track.src = "/subtitles?" + Date.now(); }
+      socket.emit("subtitles_updated");
+    } else {
+      setStatus("subtitle-status", `✗ ${data.error}`, "error");
+    }
+  } catch (e) {
+    setStatus("subtitle-status", "✗ Server error.", "error");
+  }
+}
+
+// ── Load Movie (manual path) ───────────────────────────────────────────
 
 async function loadMovie() {
   const path = document.getElementById("movie-path").value.trim();
@@ -67,7 +120,7 @@ function enableControls() {
   timeline.disabled  = false;
 }
 
-// ── Load Subtitles ─────────────────────────────────────────────────────
+// ── Load Subtitles (manual path) ───────────────────────────────────────
 
 async function loadSubtitles() {
   const path = document.getElementById("subtitle-path").value.trim();
@@ -83,10 +136,8 @@ async function loadSubtitles() {
     const data = await res.json();
     if (data.ok) {
       setStatus("subtitle-status", "✓ Subtitles loaded!", "ok");
-      // Reload the track on host video
       const track = document.getElementById("host-track");
       if (track) { track.src = "/subtitles?" + Date.now(); }
-      // Tell all viewers to reload subtitles
       socket.emit("subtitles_updated");
     } else {
       setStatus("subtitle-status", `✗ ${data.error}`, "error");
@@ -130,7 +181,7 @@ function onTimelineSeek(val) {
   isDragging = false;
   const ts = Number(val);
   video.currentTime = ts;
-  socket.emit("host_seek", { timestamp: ts });
+  socket.emit("host_seek", { timestamp: ts, name: "Host 👑" });
 }
 
 // ── Play / Pause ───────────────────────────────────────────────────────
@@ -148,7 +199,6 @@ function hostPause() {
 }
 
 // ── Receive sync events from viewers ──────────────────────────────────
-// When a viewer controls playback, host video must also sync
 
 socket.on("sync_play", (data) => {
   if (Math.abs(video.currentTime - data.timestamp) > 1.5) {
@@ -174,15 +224,21 @@ function sendChat() {
   const input = document.getElementById("chat-input");
   const text  = input.value.trim();
   if (!text) return;
-  socket.emit("chat_message", { name: "Host 👑", text });
+  socket.emit("chat_message", { name: "Host 👑", text, time: nowTime() });
   input.value = "";
 }
 
-function appendChat(name, text) {
+function appendChat(name, text, time) {
   const box = document.getElementById("chat-messages");
   const msg = document.createElement("div");
   msg.className = "chat-msg";
-  msg.innerHTML = `<span class="sender">${escHtml(name)}</span><span class="text">${escHtml(text)}</span>`;
+  msg.innerHTML = `
+    <div class="chat-msg-header">
+      <span class="sender">${escHtml(name)}</span>
+      <span class="chat-time">${escHtml(time || "")}</span>
+    </div>
+    <span class="text">${escHtml(text)}</span>
+  `;
   box.appendChild(msg);
   box.scrollTop = box.scrollHeight;
 }
@@ -206,11 +262,22 @@ function copyURL() {
 socket.on("viewer_update", (data) => {
   document.getElementById("viewer-count").textContent = data.count;
   const list = document.getElementById("viewer-list");
-  list.innerHTML = data.viewers.map(n =>
-    `<div class="viewer-chip">${escHtml(n)}</div>`
+  list.innerHTML = data.viewers.map(v =>
+    `<div class="viewer-chip">
+      ${escHtml(v.name)}
+      <span class="viewer-ts">${formatTime(v.timestamp)}</span>
+    </div>`
   ).join("");
 });
 
 socket.on("chat_message", (data) => {
-  appendChat(data.name, data.text);
+  appendChat(data.name, data.text, data.time);
 });
+
+function nowTime() {
+  const d = new Date();
+  const h = d.getHours();
+  const m = String(d.getMinutes()).padStart(2, "0");
+  const ampm = h >= 12 ? "PM" : "AM";
+  return `${h % 12 || 12}:${m} ${ampm}`;
+}

@@ -3,11 +3,115 @@ const overlay = document.getElementById("sync-overlay");
 const vTimeline    = document.getElementById("v-timeline");
 const vCurrentTime = document.getElementById("v-current-time");
 const vTotalTime   = document.getElementById("v-total-time");
+const btnToggle    = document.getElementById("v-btn-toggle");
 
 let viewerName  = "";
 let isDragging  = false;
 let isSyncing   = false;
+let clickTimer  = null;
+let typingTimer = null;
+let isTyping    = false;
 const SYNC_TOLERANCE = 1.5;
+
+// ── Volume (local only, no sync) ───────────────────────────────────────
+
+let lastVolume = 1;
+
+function onVolumeChange(val) {
+  const vol = Number(val) / 100;
+  video.volume = vol;
+  video.muted = vol === 0;
+  updateVolIcon(vol);
+  if (vol > 0) lastVolume = vol;
+  showVolToast(vol);
+}
+
+function toggleMute() {
+  if (video.muted || video.volume === 0) {
+    video.muted  = false;
+    video.volume = lastVolume;
+    document.getElementById("v-volume").value = lastVolume * 100;
+    updateVolIcon(lastVolume);
+  } else {
+    lastVolume   = video.volume;
+    video.muted  = true;
+    document.getElementById("v-volume").value = 0;
+    updateVolIcon(0);
+  }
+}
+
+function updateVolIcon(vol) {
+  const icon = document.querySelector(".vol-icon");
+  if (!icon) return;
+  if (vol === 0 || video.muted) icon.textContent = "🔇";
+  else if (vol < 0.5)           icon.textContent = "🔉";
+  else                          icon.textContent = "🔊";
+}
+
+// ── Click to play/pause, double click to fullscreen ────────────────────
+
+video.addEventListener("click", () => {
+  if (clickTimer) return;
+  clickTimer = setTimeout(() => {
+    viewerToggle();
+    clickTimer = null;
+  }, 220);
+});
+
+video.addEventListener("dblclick", () => {
+  clearTimeout(clickTimer);
+  clickTimer = null;
+  toggleFullscreen();
+});
+
+// ── Fullscreen ─────────────────────────────────────────────────────────
+
+function toggleFullscreen() {
+  const wrap = document.getElementById("watch-container");
+  if (!document.fullscreenElement) {
+    wrap.requestFullscreen().catch(e => console.error("Fullscreen failed:", e));
+  } else {
+    document.exitFullscreen();
+  }
+}
+
+// ── Auto-hide controls in fullscreen ──────────────────────────────────
+
+let controlsTimer = null;
+
+function showControls() {
+  const controls = document.querySelector(".viewer-controls");
+  controls.classList.remove("controls-hidden");
+  document.body.style.cursor = "";
+  clearTimeout(controlsTimer);
+  controlsTimer = setTimeout(() => {
+    if (document.fullscreenElement) {
+      controls.classList.add("controls-hidden");
+      document.body.style.cursor = "none";
+    }
+  }, 4000);
+}
+
+document.addEventListener("fullscreenchange", () => {
+  if (document.fullscreenElement) {
+    showControls();
+  } else {
+    clearTimeout(controlsTimer);
+    document.querySelector(".viewer-controls").classList.remove("controls-hidden");
+    document.body.style.cursor = "";
+  }
+});
+
+document.addEventListener("mousemove", () => {
+  if (document.fullscreenElement) showControls();
+});
+
+// ── Toggle button state ────────────────────────────────────────────────
+
+function setToggleBtn(playing) {
+  btnToggle.textContent = playing ? "⏸" : "▶";
+  btnToggle.classList.toggle("is-playing", playing);
+}
 
 // ── Join party ─────────────────────────────────────────────────────────
 
@@ -34,6 +138,14 @@ function formatTime(secs) {
   return `${m}:${String(sec).padStart(2,"0")}`;
 }
 
+function nowTime() {
+  const d = new Date();
+  const h = d.getHours();
+  const m = String(d.getMinutes()).padStart(2, "0");
+  const ampm = h >= 12 ? "PM" : "AM";
+  return `${h % 12 || 12}:${m} ${ampm}`;
+}
+
 function escHtml(str) {
   return str.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 }
@@ -53,16 +165,16 @@ video.addEventListener("timeupdate", () => {
   vCurrentTime.textContent = formatTime(video.currentTime);
 });
 
-// ── Viewer controls — emit to server, server broadcasts to everyone ────
+// ── Single toggle — emits same events host uses ────────────────────────
 
-function viewerPlay() {
-  video.play();
-  socket.emit("host_play", { timestamp: video.currentTime });
-}
-
-function viewerPause() {
-  video.pause();
-  socket.emit("host_pause", { timestamp: video.currentTime });
+function viewerToggle() {
+  if (video.paused) {
+    video.play();
+    socket.emit("host_play", { timestamp: video.currentTime });
+  } else {
+    video.pause();
+    socket.emit("host_pause", { timestamp: video.currentTime });
+  }
 }
 
 function onViewerTimelineDrag(val) {
@@ -74,7 +186,90 @@ function onViewerTimelineSeek(val) {
   isDragging = false;
   const ts = Number(val);
   video.currentTime = ts;
-  socket.emit("host_seek", { timestamp: ts });
+  socket.emit("host_seek", { timestamp: ts, name: viewerName || "Someone" });
+}
+
+// ── Progress reporting ─────────────────────────────────────────────────
+
+setInterval(() => {
+  if (viewerName && !video.paused) {
+    socket.emit("viewer_progress", { timestamp: video.currentTime });
+  }
+}, 5000);
+
+// ── Chat ───────────────────────────────────────────────────────────────
+
+function sendChat() {
+  const input = document.getElementById("chat-input");
+  const text  = input.value.trim();
+  if (!text || !viewerName) return;
+
+  socket.emit("chat_message", {
+    name: viewerName,
+    text: text,
+    time: nowTime(),
+  });
+  input.value = "";
+
+  if (isTyping) {
+    isTyping = false;
+    socket.emit("typing_stop", { name: viewerName });
+  }
+}
+
+function onChatInput() {
+  if (!viewerName) return;
+
+  if (!isTyping) {
+    isTyping = true;
+    socket.emit("typing_start", { name: viewerName });
+  }
+
+  clearTimeout(typingTimer);
+  typingTimer = setTimeout(() => {
+    isTyping = false;
+    socket.emit("typing_stop", { name: viewerName });
+  }, 2000);
+}
+
+function appendChat(name, text, time) {
+  const box = document.getElementById("chat-messages");
+  const msg = document.createElement("div");
+  msg.className = "chat-msg";
+  msg.innerHTML = `
+    <div class="chat-msg-header">
+      <span class="sender">${escHtml(name)}</span>
+      <span class="chat-time">${escHtml(time || "")}</span>
+    </div>
+    <span class="text">${escHtml(text)}</span>
+  `;
+  box.appendChild(msg);
+  box.scrollTop = box.scrollHeight;
+}
+
+// ── Typing indicator ───────────────────────────────────────────────────
+
+const typingUsers = new Set();
+
+socket.on("user_typing", (data) => {
+  typingUsers.add(data.name);
+  updateTypingIndicator();
+});
+
+socket.on("user_stopped_typing", (data) => {
+  typingUsers.delete(data.name);
+  updateTypingIndicator();
+});
+
+function updateTypingIndicator() {
+  const el = document.getElementById("typing-indicator");
+  if (!el) return;
+  if (typingUsers.size === 0) {
+    el.textContent = "";
+  } else {
+    const names = [...typingUsers].map(escHtml).join(", ");
+    el.textContent = `${names} ${typingUsers.size === 1 ? "is" : "are"} typing...`;
+  }
 }
 
 // ── Sync helpers ───────────────────────────────────────────────────────
@@ -92,33 +287,64 @@ function seekIfNeeded(ts) {
 
 socket.on("sync_state", (data) => {
   video.currentTime = data.timestamp;
+  setToggleBtn(data.is_playing);
+
   if (data.is_playing) {
-    video.play().catch(() => showSyncOverlay());
+    video.play().catch(() => {
+      showJoinOverlay(data.timestamp);
+    });
   }
 });
+
+function showJoinOverlay(timestamp) {
+  const overlay = document.getElementById("sync-overlay");
+  overlay.innerHTML = `
+    <div class="join-start-box" onclick="onJoinClick()">
+      <div style="font-size:36px">▶</div>
+      <div style="font-size:14px; margin-top:8px">Click to join the party</div>
+      <div style="font-size:11px; margin-top:4px; color: var(--text-dim)">
+        Movie is at ${formatTime(timestamp)}
+      </div>
+    </div>
+  `;
+  overlay.style.display = "flex";
+}
+
+function onJoinClick() {
+  video.play().then(() => {
+    const overlay = document.getElementById("sync-overlay");
+    overlay.innerHTML = `<div class="spinner"></div><span>Syncing...</span>`;
+    overlay.style.display = "none";
+    setToggleBtn(true);
+  }).catch((e) => console.error("Play failed:", e));
+}
 
 // ── Socket: play / pause / seek from anyone ────────────────────────────
 
 socket.on("sync_play", (data) => {
   seekIfNeeded(data.timestamp);
-  video.play().then(() => hideSyncOverlay()).catch(() => showSyncOverlay());
+  video.play().then(() => {
+    setToggleBtn(true);
+    hideSyncOverlay();
+  }).catch(() => showSyncOverlay());
 });
 
 socket.on("sync_pause", (data) => {
   video.pause();
   seekIfNeeded(data.timestamp);
+  setToggleBtn(false);
   hideSyncOverlay();
 });
 
 socket.on("sync_seek", (data) => {
   showSyncOverlay();
   video.currentTime = data.timestamp;
+  showSeekToast(data.name, data.timestamp);
 });
 
 // ── Socket: subtitles updated by host ─────────────────────────────────
 
 socket.on("subtitles_updated", () => {
-  // Remove old track and add fresh one so browser reloads it
   const existing = video.querySelector("track");
   if (existing) existing.remove();
 
@@ -136,29 +362,103 @@ socket.on("subtitles_updated", () => {
 socket.on("viewer_update", (data) => {
   document.getElementById("viewer-count-badge").textContent = `${data.count} watching`;
   const list = document.getElementById("viewer-list");
-  list.innerHTML = data.viewers.map(n =>
-    `<div class="viewer-item">${escHtml(n)}</div>`
+  list.innerHTML = data.viewers.map(v =>
+    `<div class="viewer-item">
+      <span>${escHtml(v.name)}</span>
+      <span class="viewer-ts">${formatTime(v.timestamp)}</span>
+    </div>`
   ).join("");
 });
 
 socket.on("chat_message", (data) => {
-  appendChat(data.name, data.text);
+  appendChat(data.name, data.text, data.time);
 });
-
-function appendChat(name, text) {
-  const box = document.getElementById("chat-messages");
-  const msg = document.createElement("div");
-  msg.className = "chat-msg";
-  msg.innerHTML = `<span class="sender">${escHtml(name)}</span><span class="text">${escHtml(text)}</span>`;
-  box.appendChild(msg);
-  box.scrollTop = box.scrollHeight;
-}
 
 // ── Video buffering events ─────────────────────────────────────────────
 
 video.addEventListener("waiting", () => showSyncOverlay());
-video.addEventListener("playing", () => hideSyncOverlay());
+video.addEventListener("playing", () => {
+  setToggleBtn(true);
+  hideSyncOverlay();
+});
+video.addEventListener("pause",   () => setToggleBtn(false));
 video.addEventListener("canplay", () => { if (!isSyncing) hideSyncOverlay(); });
 
 // ── Heartbeat ──────────────────────────────────────────────────────────
 setInterval(() => socket.emit("ping_alive"), 30000);
+
+// ── Keyboard shortcuts ─────────────────────────────────────────────────
+document.addEventListener("keydown", (e) => {
+  if (e.target.tagName === "INPUT") return;
+
+  if (e.key === " " || e.code === "Space") {
+    e.preventDefault();
+    viewerToggle();
+  } else if (e.key === "ArrowRight") {
+    e.preventDefault();
+    const ts = Math.min(video.currentTime + 10, video.duration);
+    video.currentTime = ts;
+    socket.emit("host_seek", { timestamp: ts, name: viewerName || "Someone" });
+  } else if (e.key === "ArrowLeft") {
+    e.preventDefault();
+    const ts = Math.max(video.currentTime - 10, 0);
+    video.currentTime = ts;
+    socket.emit("host_seek", { timestamp: ts, name: viewerName || "Someone" });
+  } else if (e.key === "f" || e.key === "F") {
+    e.preventDefault();
+    toggleFullscreen();
+  }
+});
+
+// ── Seek toast notification ────────────────────────────────────────────
+
+let toastTimer = null;
+
+function showSeekToast(name, timestamp) {
+  const toast = document.getElementById("seek-toast");
+  if (!toast) return;
+  toast.textContent = `${name} jumped to ${formatTime(timestamp)}`;
+  toast.classList.add("visible");
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    toast.classList.remove("visible");
+  }, 3000);
+}
+
+// ── Join rejected ──────────────────────────────────────────────────────
+
+socket.on("join_rejected", (data) => {
+  const box = document.querySelector(".overlay-box");
+  box.innerHTML = `
+    <div class="logo">🎬 CineSync</div>
+    <h2>Party Full</h2>
+    <p>${escHtml(data.reason)}</p>
+  `;
+});
+
+// ── Scroll wheel volume control ────────────────────────────────────────
+video.addEventListener("wheel", (e) => {
+  e.preventDefault();
+  const step = 0.05;
+  const newVol = Math.min(1, Math.max(0, video.volume + (e.deltaY < 0 ? step : -step)));
+  video.volume = newVol;
+  video.muted  = newVol === 0;
+  document.getElementById("v-volume").value = newVol * 100;
+  updateVolIcon(newVol);
+  if (newVol > 0) lastVolume = newVol;
+  showVolToast(newVol);
+}, { passive: false });
+
+// ── Volume toast ───────────────────────────────────────────────────────
+let volToastTimer = null;
+
+function showVolToast(vol) {
+  const toast = document.getElementById("vol-toast");
+  if (!toast) return;
+  const pct  = Math.round(vol * 100);
+  const icon = vol === 0 ? "🔇" : vol < 0.5 ? "🔉" : "🔊";
+  toast.textContent = `${icon} ${pct}%`;
+  toast.classList.add("visible");
+  if (volToastTimer) clearTimeout(volToastTimer);
+  volToastTimer = setTimeout(() => toast.classList.remove("visible"), 1500);
+}
