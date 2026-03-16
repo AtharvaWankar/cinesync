@@ -148,13 +148,20 @@ async function loadSubtitles() {
 }
 
 async function clearSubtitles() {
-  await fetch("/api/load_subtitles", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ path: "" }),
-  });
-  setStatus("subtitle-status", "Subtitles cleared.", "ok");
-  socket.emit("subtitles_updated");
+  try {
+    await fetch("/api/load_subtitles", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: "" }),
+    });
+    document.getElementById("subtitle-path").value = "";
+    setStatus("subtitle-status", "Subtitles cleared.", "ok");
+    const track = document.getElementById("host-track");
+    if (track) { track.src = ""; }
+    socket.emit("subtitles_updated");
+  } catch (e) {
+    setStatus("subtitle-status", "✗ Server error.", "error");
+  }
 }
 
 // ── Video metadata ─────────────────────────────────────────────────────

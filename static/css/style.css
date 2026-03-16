@@ -203,7 +203,6 @@ input[type="range"]:disabled { opacity: 0.4; }
 
 /* Chat */
 .chat-messages {
-  height: 160px;
   overflow-y: auto;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -249,8 +248,9 @@ input[type="range"]:disabled { opacity: 0.4; }
 }
 
 #viewer-video {
+  flex: 1;
+  min-height: 0;
   width: 100%;
-  height: 100%;
   object-fit: contain;
 }
 
@@ -275,6 +275,7 @@ input[type="range"]:disabled { opacity: 0.4; }
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  height: 100vh;
 }
 
 .sidebar-header {
@@ -283,6 +284,7 @@ input[type="range"]:disabled { opacity: 0.4; }
   justify-content: space-between;
   padding: 14px 16px;
   border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
 }
 
 .logo-small { font-size: 14px; font-weight: 700; color: var(--accent); }
@@ -305,11 +307,13 @@ input[type="range"]:disabled { opacity: 0.4; }
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  flex-shrink: 0;
 }
 
 .viewer-section {
   padding: 12px 16px;
   border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
 }
 
 .section-label {
@@ -347,16 +351,20 @@ input[type="range"]:disabled { opacity: 0.4; }
   flex-direction: column;
   padding: 12px 16px;
   min-height: 0;
+  overflow: hidden;
 }
 
 .chat-section .chat-messages {
   flex: 1;
-  height: auto;
+  height: 0;
   min-height: 0;
+  overflow-y: auto;
+  margin-bottom: 0;
 }
 
 .chat-section .chat-input-row {
   margin-top: 8px;
+  flex-shrink: 0;
 }
 
 /* ── Overlay (name prompt) ───────────────────── */
@@ -402,15 +410,7 @@ input[type="range"]:disabled { opacity: 0.4; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 
-
 /* ── Viewer Controls Bar ─────────────────────────────────────────────── */
-#viewer-video {
-  flex: 1;
-  min-height: 0;
-  width: 100%;
-  object-fit: contain;
-}
-
 .viewer-controls {
   flex-shrink: 0;
   display: flex;
@@ -421,6 +421,7 @@ input[type="range"]:disabled { opacity: 0.4; }
   border-top: 1px solid var(--border);
   width: 100%;
   box-sizing: border-box;
+  transition: opacity 0.7s ease, transform 0.7s ease;
 }
 
 .viewer-controls #v-timeline {
@@ -434,6 +435,12 @@ input[type="range"]:disabled { opacity: 0.4; }
 
 .viewer-controls .ctrl-btn--toggle {
   flex-shrink: 0;
+}
+
+.viewer-controls.controls-hidden {
+  opacity: 0;
+  transform: translateY(100%);
+  pointer-events: none;
 }
 
 .ctrl-btn {
@@ -455,7 +462,7 @@ input[type="range"]:disabled { opacity: 0.4; }
   white-space: nowrap;
 }
 
-/* subtitle optional tag */
+/* ── Subtitle optional tag ────────────────────────────────────────────── */
 .optional-tag {
   font-size: 11px;
   font-weight: 400;
@@ -507,6 +514,7 @@ input[type="range"]:disabled { opacity: 0.4; }
   flex-direction: column;
   height: 100%;
   width: 300px;
+  min-height: 0;
   overflow: hidden;
   transition: opacity 0.15s ease;
 }
@@ -598,7 +606,6 @@ input[type="range"]:disabled { opacity: 0.4; }
   height: 28px;
 }
 
-/* The popup stays visible as long as cursor is anywhere inside vol-wrap */
 .vol-slider-wrap {
   position: absolute;
   bottom: 28px;
@@ -650,16 +657,6 @@ input[type="range"]:disabled { opacity: 0.4; }
   background: rgba(124, 111, 247, 0.28);
 }
 
-/* ── Auto-hide controls in fullscreen ────────────────────────────────── */
-.viewer-controls {
-  transition: opacity 0.7s ease, transform 0.7s ease;
-}
-
-.viewer-controls.controls-hidden {
-  opacity: 0;
-  transform: translateY(100%);
-}
-
 /* ── Viewer timestamps ────────────────────────────────────────────────── */
 .viewer-ts {
   font-size: 11px;
@@ -689,6 +686,7 @@ input[type="range"]:disabled { opacity: 0.4; }
   font-style: italic;
   min-height: 16px;
   padding: 2px 0 4px;
+  flex-shrink: 0;
 }
 
 /* ── Volume toast ─────────────────────────────────────────────────────── */

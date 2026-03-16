@@ -357,6 +357,58 @@ socket.on("subtitles_updated", () => {
   video.appendChild(track);
 });
 
+// ── Subtitle delay ─────────────────────────────────────────────────────
+
+let subtitleDelay = 0;
+
+function applySubtitleDelay(delta) {
+  subtitleDelay += delta;
+
+  const trackEl = video.querySelector("track");
+  if (!trackEl || !trackEl.track) return;
+
+  const track = trackEl.track;
+  track.mode = "hidden";
+
+  const cues = track.cues;
+  if (!cues || cues.length === 0) {
+    track.mode = "showing";
+    showSubtitleToast();
+    return;
+  }
+
+  for (let i = 0; i < cues.length; i++) {
+    cues[i].startTime += delta;
+    cues[i].endTime   += delta;
+  }
+
+  track.mode = "showing";
+  showSubtitleToast();
+}
+
+function showSubtitleToast() {
+  const ms   = Math.round(subtitleDelay * 1000);
+  const sign = ms >= 0 ? "+" : "";
+  showToastMessage(`Subtitle delay: ${sign}${ms}ms`);
+}
+
+// ── Toast helper ───────────────────────────────────────────────────────
+
+let toastTimer = null;
+
+function showToastMessage(msg) {
+  const toast = document.getElementById("seek-toast");
+  if (!toast) return;
+  toast.textContent = msg;
+  toast.classList.add("visible");
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toast.classList.remove("visible"), 2000);
+}
+
+function showSeekToast(name, timestamp) {
+  showToastMessage(`${name} jumped to ${formatTime(timestamp)}`);
+}
+
 // ── Socket: viewer list + chat ─────────────────────────────────────────
 
 socket.on("viewer_update", (data) => {
@@ -407,23 +459,14 @@ document.addEventListener("keydown", (e) => {
   } else if (e.key === "f" || e.key === "F") {
     e.preventDefault();
     toggleFullscreen();
+  } else if (e.key === "o" || e.key === "O") {
+    e.preventDefault();
+    applySubtitleDelay(-0.05);
+  } else if (e.key === "p" || e.key === "P") {
+    e.preventDefault();
+    applySubtitleDelay(0.05);
   }
 });
-
-// ── Seek toast notification ────────────────────────────────────────────
-
-let toastTimer = null;
-
-function showSeekToast(name, timestamp) {
-  const toast = document.getElementById("seek-toast");
-  if (!toast) return;
-  toast.textContent = `${name} jumped to ${formatTime(timestamp)}`;
-  toast.classList.add("visible");
-  if (toastTimer) clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => {
-    toast.classList.remove("visible");
-  }, 3000);
-}
 
 // ── Join rejected ──────────────────────────────────────────────────────
 
