@@ -204,6 +204,7 @@ input[type="range"]:disabled { opacity: 0.4; }
 /* Chat */
 .chat-messages {
   overflow-y: auto;
+  overflow-x: hidden;
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 10px;
@@ -216,6 +217,8 @@ input[type="range"]:disabled { opacity: 0.4; }
 .chat-msg {
   font-size: 12px;
   line-height: 1.4;
+  word-break: break-all;
+  overflow-wrap: anywhere;
 }
 .chat-msg .sender {
   font-weight: 600;
@@ -359,6 +362,7 @@ input[type="range"]:disabled { opacity: 0.4; }
   height: 0;
   min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
   margin-bottom: 0;
 }
 
