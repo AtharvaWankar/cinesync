@@ -712,3 +712,23 @@ input[type="range"]:disabled { opacity: 0.4; }
 .vol-toast.visible {
   opacity: 1;
 }
+
+/* ── Out of sync indicator ────────────────────────────────────────────── */
+.sync-indicator {
+  position: fixed;
+  top: 16px;
+  right: 20px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--red);
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  pointer-events: none;
+  z-index: 60;
+  box-shadow: 0 0 6px rgba(224, 82, 82, 0.8);
+}
+
+.sync-indicator.visible {
+  opacity: 1;
+}

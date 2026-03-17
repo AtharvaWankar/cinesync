@@ -40,13 +40,13 @@
              onchange="onViewerTimelineSeek(this.value)"/>
       <span id="v-total-time" class="time-display">0:00</span>
       <div class="vol-wrap">
-  <span class="vol-icon" onclick="toggleMute()">🔊</span>
-  <div class="vol-slider-wrap">
-    <input type="range" id="v-volume" min="0" max="100" value="100" step="1"
-           oninput="onVolumeChange(this.value)"/>
-  </div>
-  <div id="vol-toast" class="vol-toast"></div>
-</div>
+        <span class="vol-icon" onclick="toggleMute()">🔊</span>
+        <div class="vol-slider-wrap">
+          <input type="range" id="v-volume" min="0" max="100" value="100" step="1"
+                 oninput="onVolumeChange(this.value)"/>
+        </div>
+        <div id="vol-toast" class="vol-toast"></div>
+      </div>
     </div>
 
     <div id="sync-overlay" class="sync-overlay" style="display:none">
@@ -95,10 +95,8 @@
 
   <!-- Seek toast -->
   <div id="seek-toast" class="seek-toast"></div>
-
-  <!-- Seek toast -->
-  <div id="seek-toast" class="seek-toast"></div>
-
+    <!-- Out of sync indicator -->
+  <div id="sync-indicator" class="sync-indicator"></div>
 </div><!-- end watch-container -->
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
@@ -108,6 +106,7 @@
     const icon      = document.getElementById("toggle-icon");
     const isCollapsed = container.classList.toggle("sidebar-collapsed");
     icon.textContent = isCollapsed ? "«" : "»";
+
   }
 
   const socket = io({
