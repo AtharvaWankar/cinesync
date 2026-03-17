@@ -22,15 +22,23 @@ def register_events(socketio: SocketIO):
 
         name = data.get("name", "Friend")
         state.add_viewer(req.sid, name)
+        colour = state.get_viewer_colour(req.sid)
 
+        # Send playback state
         emit("sync_state", state.snapshot())
+
+        # Send chat history to the new joiner
+        emit("chat_history", {"messages": state.get_chat_history()})
+
+        # Send assigned colour to the new joiner
+        emit("your_colour", {"colour": colour})
 
         socketio.emit("viewer_update", {
             "count":   state.viewer_count(),
             "viewers": state.viewers_with_timestamp(),
         }, room=ROOM)
 
-        print(f"[JOIN]  {name} joined. Total viewers: {state.viewer_count()}")
+        print(f"[JOIN]  {name} joined with colour {colour}. Total: {state.viewer_count()}")
 
     # ── Disconnect ─────────────────────────────────────────────────────
     @socketio.on("disconnect")
@@ -62,7 +70,6 @@ def register_events(socketio: SocketIO):
     # ── Seek ───────────────────────────────────────────────────────────
     @socketio.on("host_seek")
     def on_seek(data):
-        from flask import request as req
         ts = float(data.get("timestamp", 0))
         name = data.get("name", "Someone")
         state.seek(ts)
@@ -83,13 +90,19 @@ def register_events(socketio: SocketIO):
     # ── Chat ───────────────────────────────────────────────────────────
     @socketio.on("chat_message")
     def on_chat(data):
-        name = data.get("name", "?")
-        text = data.get("text", "").strip()[:300]
+        from flask import request as req
+        name   = data.get("name", "?")
+        text   = data.get("text", "").strip()[:300]
+        time   = data.get("time", "")
+        colour = data.get("colour", "#e8e8f0")
+
         if text:
+            state.add_chat_message(name, text, time, colour)
             socketio.emit("chat_message", {
-                "name": name,
-                "text": text,
-                "time": data.get("time", "")
+                "name":   name,
+                "text":   text,
+                "time":   time,
+                "colour": colour,
             }, room=ROOM)
 
     # ── Typing indicator ───────────────────────────────────────────────
@@ -97,7 +110,6 @@ def register_events(socketio: SocketIO):
     def on_typing_start(data):
         from flask import request as req
         name = data.get("name", "Someone")
-        # Broadcast to everyone except the sender
         socketio.emit("user_typing", {"name": name}, room=ROOM, skip_sid=req.sid)
 
     @socketio.on("typing_stop")

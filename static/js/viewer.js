@@ -6,8 +6,8 @@ const vTotalTime   = document.getElementById("v-total-time");
 const btnToggle    = document.getElementById("v-btn-toggle");
 
 let viewerName  = "";
+let myColour    = "#e8e8f0"; // assigned by server on join
 let isDragging  = false;
-let isSyncing   = false;
 let clickTimer  = null;
 let typingTimer = null;
 let isTyping    = false;
@@ -127,6 +127,12 @@ function joinParty() {
   document.getElementById("watch-container").style.display = "grid";
 }
 
+// ── Colour assigned by server ──────────────────────────────────────────
+
+socket.on("your_colour", (data) => {
+  myColour = data.colour;
+});
+
 // ── Utilities ──────────────────────────────────────────────────────────
 
 function formatTime(secs) {
@@ -189,13 +195,13 @@ function onViewerTimelineSeek(val) {
   socket.emit("host_seek", { timestamp: ts, name: viewerName || "Someone" });
 }
 
-// ── Progress reporting ─────────────────────────────────────────────────
+// ── Progress reporting — every 1 second ───────────────────────────────
 
 setInterval(() => {
   if (viewerName && !video.paused) {
     socket.emit("viewer_progress", { timestamp: video.currentTime });
   }
-}, 5000);
+}, 1000);
 
 // ── Chat ───────────────────────────────────────────────────────────────
 
@@ -205,9 +211,10 @@ function sendChat() {
   if (!text || !viewerName) return;
 
   socket.emit("chat_message", {
-    name: viewerName,
-    text: text,
-    time: nowTime(),
+    name:   viewerName,
+    text:   text,
+    time:   nowTime(),
+    colour: myColour,
   });
   input.value = "";
 
@@ -232,13 +239,13 @@ function onChatInput() {
   }, 2000);
 }
 
-function appendChat(name, text, time) {
+function appendChat(name, text, time, colour) {
   const box = document.getElementById("chat-messages");
   const msg = document.createElement("div");
   msg.className = "chat-msg";
   msg.innerHTML = `
     <div class="chat-msg-header">
-      <span class="sender">${escHtml(name)}</span>
+      <span class="sender" style="color:${colour || "var(--accent)"}">${escHtml(name)}</span>
       <span class="chat-time">${escHtml(time || "")}</span>
     </div>
     <span class="text">${escHtml(text)}</span>
@@ -246,6 +253,14 @@ function appendChat(name, text, time) {
   box.appendChild(msg);
   box.scrollTop = box.scrollHeight;
 }
+
+// ── Chat history on join ───────────────────────────────────────────────
+
+socket.on("chat_history", (data) => {
+  const box = document.getElementById("chat-messages");
+  box.innerHTML = ""; // clear first
+  data.messages.forEach(m => appendChat(m.name, m.text, m.time, m.colour));
+});
 
 // ── Typing indicator ───────────────────────────────────────────────────
 
@@ -274,8 +289,8 @@ function updateTypingIndicator() {
 
 // ── Sync helpers ───────────────────────────────────────────────────────
 
-function showSyncOverlay() { overlay.style.display = "flex"; isSyncing = true; }
-function hideSyncOverlay() { overlay.style.display = "none";  isSyncing = false; }
+function showSyncOverlay() { overlay.style.display = "flex"; }
+function hideSyncOverlay() { overlay.style.display = "none"; }
 
 function seekIfNeeded(ts) {
   if (Math.abs(video.currentTime - ts) > SYNC_TOLERANCE) {
@@ -337,7 +352,6 @@ socket.on("sync_pause", (data) => {
 });
 
 socket.on("sync_seek", (data) => {
-  showSyncOverlay();
   video.currentTime = data.timestamp;
   showSeekToast(data.name, data.timestamp);
 });
@@ -357,21 +371,86 @@ socket.on("subtitles_updated", () => {
   video.appendChild(track);
 });
 
+// ── Subtitle delay ─────────────────────────────────────────────────────
+
+let subtitleDelay = 0;
+
+function applySubtitleDelay(delta) {
+  subtitleDelay += delta;
+
+  const trackEl = video.querySelector("track");
+  if (!trackEl || !trackEl.track) return;
+
+  const track = trackEl.track;
+  track.mode = "hidden";
+
+  const cues = track.cues;
+  if (!cues || cues.length === 0) {
+    track.mode = "showing";
+    showSubtitleToast();
+    return;
+  }
+
+  for (let i = 0; i < cues.length; i++) {
+    cues[i].startTime += delta;
+    cues[i].endTime   += delta;
+  }
+
+  track.mode = "showing";
+  showSubtitleToast();
+}
+
+function showSubtitleToast() {
+  const ms   = Math.round(subtitleDelay * 1000);
+  const sign = ms >= 0 ? "+" : "";
+  showToastMessage(`Subtitle delay: ${sign}${ms}ms`);
+}
+
+// ── Toast helper ───────────────────────────────────────────────────────
+
+let toastTimer = null;
+
+function showToastMessage(msg) {
+  const toast = document.getElementById("seek-toast");
+  if (!toast) return;
+  toast.textContent = msg;
+  toast.classList.add("visible");
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toast.classList.remove("visible"), 2000);
+}
+
+function showSeekToast(name, timestamp) {
+  showToastMessage(`${name} jumped to ${formatTime(timestamp)}`);
+}
+
 // ── Socket: viewer list + chat ─────────────────────────────────────────
 
 socket.on("viewer_update", (data) => {
   document.getElementById("viewer-count-badge").textContent = `${data.count} watching`;
   const list = document.getElementById("viewer-list");
-  list.innerHTML = data.viewers.map(v =>
-    `<div class="viewer-item">
-      <span>${escHtml(v.name)}</span>
-      <span class="viewer-ts">${formatTime(v.timestamp)}</span>
-    </div>`
-  ).join("");
+
+  let anyoneOutOfSync = false;
+
+  list.innerHTML = data.viewers.map(v => {
+    const diff      = Math.abs(v.timestamp - video.currentTime);
+    const outOfSync = diff > 1.5 && video.currentTime > 0;
+    if (outOfSync) anyoneOutOfSync = true;
+    const tsColor   = outOfSync ? "var(--red)" : "var(--text-dim)";
+    return `<div class="viewer-item">
+      <span style="color:${v.colour}">${escHtml(v.name)}</span>
+      <span class="viewer-ts" style="color:${tsColor}">${formatTime(v.timestamp)}</span>
+    </div>`;
+  }).join("");
+
+  const indicator = document.getElementById("sync-indicator");
+  if (indicator) {
+    const show = anyoneOutOfSync && document.fullscreenElement;
+    indicator.classList.toggle("visible", show);
+  }
 });
 
 socket.on("chat_message", (data) => {
-  appendChat(data.name, data.text, data.time);
+  appendChat(data.name, data.text, data.time, data.colour);
 });
 
 // ── Video buffering events ─────────────────────────────────────────────
@@ -381,8 +460,8 @@ video.addEventListener("playing", () => {
   setToggleBtn(true);
   hideSyncOverlay();
 });
-video.addEventListener("pause",   () => setToggleBtn(false));
-video.addEventListener("canplay", () => { if (!isSyncing) hideSyncOverlay(); });
+video.addEventListener("pause", () => setToggleBtn(false));
+video.addEventListener("canplay", () => hideSyncOverlay());
 
 // ── Heartbeat ──────────────────────────────────────────────────────────
 setInterval(() => socket.emit("ping_alive"), 30000);
@@ -407,23 +486,14 @@ document.addEventListener("keydown", (e) => {
   } else if (e.key === "f" || e.key === "F") {
     e.preventDefault();
     toggleFullscreen();
+  } else if (e.key === "o" || e.key === "O") {
+    e.preventDefault();
+    applySubtitleDelay(-0.05);
+  } else if (e.key === "p" || e.key === "P") {
+    e.preventDefault();
+    applySubtitleDelay(0.05);
   }
 });
-
-// ── Seek toast notification ────────────────────────────────────────────
-
-let toastTimer = null;
-
-function showSeekToast(name, timestamp) {
-  const toast = document.getElementById("seek-toast");
-  if (!toast) return;
-  toast.textContent = `${name} jumped to ${formatTime(timestamp)}`;
-  toast.classList.add("visible");
-  if (toastTimer) clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => {
-    toast.classList.remove("visible");
-  }, 3000);
-}
 
 // ── Join rejected ──────────────────────────────────────────────────────
 

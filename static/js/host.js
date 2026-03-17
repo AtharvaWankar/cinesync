@@ -5,6 +5,8 @@ const totalTimeEl   = document.getElementById("total-time");
 const btnPlay  = document.getElementById("btn-play");
 const btnPause = document.getElementById("btn-pause");
 
+const HOST_COLOUR = "#f0c040"; // gold — always host's colour
+
 let isDragging  = false;
 let movieLoaded = false;
 
@@ -29,6 +31,18 @@ function setBadge(text, active = false) {
   const el = document.getElementById("status-badge");
   el.textContent = text;
   el.className = active ? "badge active" : "badge";
+}
+
+function nowTime() {
+  const d = new Date();
+  const h = d.getHours();
+  const m = String(d.getMinutes()).padStart(2, "0");
+  const ampm = h >= 12 ? "PM" : "AM";
+  return `${h % 12 || 12}:${m} ${ampm}`;
+}
+
+function escHtml(str) {
+  return str.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 }
 
 // ── Native File Browser ────────────────────────────────────────────────
@@ -148,13 +162,20 @@ async function loadSubtitles() {
 }
 
 async function clearSubtitles() {
-  await fetch("/api/load_subtitles", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ path: "" }),
-  });
-  setStatus("subtitle-status", "Subtitles cleared.", "ok");
-  socket.emit("subtitles_updated");
+  try {
+    await fetch("/api/load_subtitles", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: "" }),
+    });
+    document.getElementById("subtitle-path").value = "";
+    setStatus("subtitle-status", "Subtitles cleared.", "ok");
+    const track = document.getElementById("host-track");
+    if (track) { track.src = ""; }
+    socket.emit("subtitles_updated");
+  } catch (e) {
+    setStatus("subtitle-status", "✗ Server error.", "error");
+  }
 }
 
 // ── Video metadata ─────────────────────────────────────────────────────
@@ -224,27 +245,28 @@ function sendChat() {
   const input = document.getElementById("chat-input");
   const text  = input.value.trim();
   if (!text) return;
-  socket.emit("chat_message", { name: "Host 👑", text, time: nowTime() });
+  socket.emit("chat_message", {
+    name:   "Host 👑",
+    text:   text,
+    time:   nowTime(),
+    colour: HOST_COLOUR,
+  });
   input.value = "";
 }
 
-function appendChat(name, text, time) {
+function appendChat(name, text, time, colour) {
   const box = document.getElementById("chat-messages");
   const msg = document.createElement("div");
   msg.className = "chat-msg";
   msg.innerHTML = `
     <div class="chat-msg-header">
-      <span class="sender">${escHtml(name)}</span>
+      <span class="sender" style="color:${colour || HOST_COLOUR}">${escHtml(name)}</span>
       <span class="chat-time">${escHtml(time || "")}</span>
     </div>
     <span class="text">${escHtml(text)}</span>
   `;
   box.appendChild(msg);
   box.scrollTop = box.scrollHeight;
-}
-
-function escHtml(str) {
-  return str.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 }
 
 // ── Copy URL ───────────────────────────────────────────────────────────
@@ -263,21 +285,13 @@ socket.on("viewer_update", (data) => {
   document.getElementById("viewer-count").textContent = data.count;
   const list = document.getElementById("viewer-list");
   list.innerHTML = data.viewers.map(v =>
-    `<div class="viewer-chip">
-      ${escHtml(v.name)}
+    `<div class="viewer-chip" style="border-color:${v.colour}40">
+      <span style="color:${v.colour}">${escHtml(v.name)}</span>
       <span class="viewer-ts">${formatTime(v.timestamp)}</span>
     </div>`
   ).join("");
 });
 
 socket.on("chat_message", (data) => {
-  appendChat(data.name, data.text, data.time);
+  appendChat(data.name, data.text, data.time, data.colour);
 });
-
-function nowTime() {
-  const d = new Date();
-  const h = d.getHours();
-  const m = String(d.getMinutes()).padStart(2, "0");
-  const ampm = h >= 12 ? "PM" : "AM";
-  return `${h % 12 || 12}:${m} ${ampm}`;
-}
