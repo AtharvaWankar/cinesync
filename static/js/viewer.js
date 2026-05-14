@@ -371,6 +371,45 @@ socket.on("subtitles_updated", () => {
   video.appendChild(track);
 });
 
+// ── Movie changed by host ──────────────────────────────────────────────
+
+socket.on("movie_changed", (data) => {
+  // Reset video to fresh state
+  video.pause();
+  video.src = "/video?" + Date.now(); // cache-bust
+  video.load();
+
+  // Reset timeline UI
+  vTimeline.value = 0;
+  vTimeline.max   = 100;
+  vCurrentTime.textContent = "0:00";
+  vTotalTime.textContent   = "0:00";
+
+  // Reset toggle button
+  setToggleBtn(false);
+
+  // Update movie title in sidebar
+  const titleEl = document.getElementById("movie-title");
+  if (titleEl) titleEl.textContent = data.movie_name;
+
+  // Handle subtitle track
+  const existing = video.querySelector("track");
+  if (existing) existing.remove();
+
+  if (data.has_subtitles) {
+    const track = document.createElement("track");
+    track.kind    = "subtitles";
+    track.src     = "/subtitles?" + Date.now();
+    track.srclang = "en";
+    track.label   = "Subtitles";
+    track.default = true;
+    video.appendChild(track);
+  }
+
+  // Show toast so viewer knows something changed
+  showToastMessage(`▶ Now loading: ${data.movie_name}`);
+});
+
 // ── Subtitle delay ─────────────────────────────────────────────────────
 
 let subtitleDelay = 0;

@@ -13,7 +13,6 @@ from server.video_server import video_bp
 from server.sync_server import register_events
 from server.network import get_tailscale_ip, get_watch_url
 
-# ── App setup ──────────────────────────────────────────────────────────
 app = Flask(__name__)
 app.config["SECRET_KEY"] = "cinesync-secret-2024"
 
@@ -25,12 +24,9 @@ socketio = SocketIO(
     engineio_logger=False,
 )
 
-# ── Register blueprints & socket events ───────────────────────────────
 app.register_blueprint(video_bp)
 register_events(socketio)
 
-
-# ── Routes ─────────────────────────────────────────────────────────────
 
 @app.route("/")
 def host_panel():
@@ -76,12 +72,18 @@ def load_movie():
     state.set_movie(path)
     state.party_active = True
     print(f"[MOVIE] Loaded: {path}")
+
+    # Broadcast to all viewers if party is already active
+    socketio.emit("movie_changed", {
+        "movie_name":    state.movie_name,
+        "has_subtitles": state.subtitle_path is not None,
+    }, room="watch_party")
+
     return jsonify({"ok": True, "movie_name": state.movie_name})
 
 
 @app.route("/api/load_subtitles", methods=["POST"])
 def load_subtitles():
-    """Host loads an .srt subtitle file."""
     data = request.get_json()
     path = data.get("path", "").strip()
 
@@ -102,7 +104,6 @@ def load_subtitles():
 
 @app.route("/api/browse_movie")
 def browse_movie():
-    """Open native Windows file picker, return the selected path."""
     root = tk.Tk()
     root.withdraw()
     root.wm_attributes("-topmost", True)
@@ -129,12 +130,18 @@ def browse_movie():
     state.set_movie(path)
     state.party_active = True
     print(f"[MOVIE] Loaded: {path}")
+
+    # Broadcast to all viewers
+    socketio.emit("movie_changed", {
+        "movie_name":    state.movie_name,
+        "has_subtitles": state.subtitle_path is not None,
+    }, room="watch_party")
+
     return jsonify({"ok": True, "movie_name": state.movie_name, "path": path})
 
 
 @app.route("/api/browse_subtitle")
 def browse_subtitle():
-    """Open native Windows file picker for .srt files."""
     root = tk.Tk()
     root.withdraw()
     root.wm_attributes("-topmost", True)
@@ -161,10 +168,6 @@ def browse_subtitle():
 
 @app.route("/subtitles")
 def serve_subtitles():
-    """
-    Convert .srt to .vtt on the fly and serve it.
-    Browsers only understand .vtt — we convert in memory, no temp files needed.
-    """
     if not state.subtitle_path or not os.path.isfile(state.subtitle_path):
         abort(404)
 
@@ -172,12 +175,10 @@ def serve_subtitles():
         srt_content = f.read()
 
     vtt = srt_to_vtt(srt_content)
-
     return Response(vtt, mimetype="text/vtt")
 
 
 def srt_to_vtt(srt: str) -> str:
-    """Convert SRT subtitle format to WebVTT format in memory."""
     vtt = re.sub(r"(\d{2}:\d{2}:\d{2}),(\d{3})", r"\1.\2", srt)
     vtt = vtt.replace("\r\n", "\n").replace("\r", "\n")
     return "WEBVTT\n\n" + vtt.strip()
@@ -196,8 +197,6 @@ def api_status():
         "has_subtitles": state.subtitle_path is not None,
     })
 
-
-# ── Boot ───────────────────────────────────────────────────────────────
 
 def open_host_browser():
     import time

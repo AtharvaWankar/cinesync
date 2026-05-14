@@ -1,18 +1,17 @@
 import random
 import threading
 
-# Curated palette — readable on dark backgrounds, all distinct
 COLOUR_PALETTE = [
-    "#7c6ff7",  # accent purple (but only for non-host)
-    "#4caf6e",  # green
-    "#e05252",  # red
-    "#f0a500",  # amber
-    "#29b6f6",  # light blue
-    "#f06292",  # pink
-    "#80cbc4",  # teal
-    "#ffb74d",  # orange
-    "#ce93d8",  # lavender
-    "#80deea",  # cyan
+    "#7c6ff7",
+    "#4caf6e",
+    "#e05252",
+    "#f0a500",
+    "#29b6f6",
+    "#f06292",
+    "#80cbc4",
+    "#ffb74d",
+    "#ce93d8",
+    "#80deea",
 ]
 
 class PartyState:
@@ -23,16 +22,22 @@ class PartyState:
         self.subtitle_path = None
         self.is_playing    = False
         self.timestamp     = 0.0
-        self.viewers       = {}     # { sid: { "name", "timestamp", "colour" } }
+        self.viewers       = {}
         self.party_active  = False
-        self.chat_history  = []     # list of { name, text, time, colour }
-        self._used_colours = []     # track assigned colours to avoid repeats
+        self.chat_history  = []
+        self._used_colours = []
 
     # ── Movie ──────────────────────────────────────────────────────────
     def set_movie(self, path: str):
         with self._lock:
             self.movie_path = path
             self.movie_name = path.split("\\")[-1].split("/")[-1]
+            # Always reset playback state on new movie
+            self.timestamp  = 0.0
+            self.is_playing = False
+            # Reset all viewer timestamps too
+            for sid in self.viewers:
+                self.viewers[sid]["timestamp"] = 0.0
 
     # ── Subtitles ──────────────────────────────────────────────────────
     def set_subtitle(self, path: str):
@@ -60,10 +65,9 @@ class PartyState:
 
     # ── Viewers ────────────────────────────────────────────────────────
     def _assign_colour(self) -> str:
-        """Pick a colour not currently in use, cycling if needed."""
         available = [c for c in COLOUR_PALETTE if c not in self._used_colours]
         if not available:
-            available = COLOUR_PALETTE  # all used, start over
+            available = COLOUR_PALETTE
         colour = random.choice(available)
         self._used_colours.append(colour)
         return colour
@@ -104,12 +108,9 @@ class PartyState:
     def add_chat_message(self, name: str, text: str, time: str, colour: str):
         with self._lock:
             self.chat_history.append({
-                "name":   name,
-                "text":   text,
-                "time":   time,
-                "colour": colour,
+                "name": name, "text": text,
+                "time": time, "colour": colour,
             })
-            # cap at 100 messages
             if len(self.chat_history) > 100:
                 self.chat_history = self.chat_history[-100:]
 
@@ -128,5 +129,4 @@ class PartyState:
             }
 
 
-# Global singleton
 state = PartyState()

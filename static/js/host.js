@@ -5,7 +5,7 @@ const totalTimeEl   = document.getElementById("total-time");
 const btnPlay  = document.getElementById("btn-play");
 const btnPause = document.getElementById("btn-pause");
 
-const HOST_COLOUR = "#f0c040"; // gold — always host's colour
+const HOST_COLOUR = "#f0c040";
 
 let isDragging  = false;
 let movieLoaded = false;
@@ -45,6 +45,25 @@ function escHtml(str) {
   return str.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 }
 
+// ── After movie loads — reset host video to fresh state ───────────────
+
+function onMovieLoaded(movie_name) {
+  document.getElementById("movie-loaded-name").textContent = `🎬 ${movie_name}`;
+  enableControls();
+  movieLoaded = true;
+  setBadge("● Party Active", true);
+
+  // Reset host video completely
+  video.pause();
+  video.src = "/video?" + Date.now(); // cache-bust so browser fetches fresh
+  video.load();
+
+  // Reset timeline UI
+  timeline.value = 0;
+  currentTimeEl.textContent = "0:00";
+  totalTimeEl.textContent   = "0:00";
+}
+
 // ── Native File Browser ────────────────────────────────────────────────
 
 async function browseMovie() {
@@ -53,19 +72,11 @@ async function browseMovie() {
     const res  = await fetch("/api/browse_movie");
     const data = await res.json();
 
-    if (data.cancelled) {
-      setStatus("load-status", "", "");
-      return;
-    }
+    if (data.cancelled) { setStatus("load-status", "", ""); return; }
     if (data.ok) {
       document.getElementById("movie-path").value = data.path;
       setStatus("load-status", `✓ Loaded: ${data.movie_name}`, "ok");
-      document.getElementById("movie-loaded-name").textContent = `🎬 ${data.movie_name}`;
-      enableControls();
-      movieLoaded = true;
-      setBadge("● Party Active", true);
-      video.src = "/video";
-      video.load();
+      onMovieLoaded(data.movie_name);
     } else {
       setStatus("load-status", `✗ ${data.error}`, "error");
     }
@@ -80,10 +91,7 @@ async function browseSubtitle() {
     const res  = await fetch("/api/browse_subtitle");
     const data = await res.json();
 
-    if (data.cancelled) {
-      setStatus("subtitle-status", "", "");
-      return;
-    }
+    if (data.cancelled) { setStatus("subtitle-status", "", ""); return; }
     if (data.ok) {
       document.getElementById("subtitle-path").value = data.path;
       setStatus("subtitle-status", "✓ Subtitles loaded!", "ok");
@@ -114,12 +122,7 @@ async function loadMovie() {
     const data = await res.json();
     if (data.ok) {
       setStatus("load-status", `✓ Loaded: ${data.movie_name}`, "ok");
-      document.getElementById("movie-loaded-name").textContent = `🎬 ${data.movie_name}`;
-      enableControls();
-      movieLoaded = true;
-      setBadge("● Party Active", true);
-      video.src = "/video";
-      video.load();
+      onMovieLoaded(data.movie_name);
     } else {
       setStatus("load-status", `✗ ${data.error}`, "error");
     }
@@ -246,10 +249,7 @@ function sendChat() {
   const text  = input.value.trim();
   if (!text) return;
   socket.emit("chat_message", {
-    name:   "Host 👑",
-    text:   text,
-    time:   nowTime(),
-    colour: HOST_COLOUR,
+    name: "Host 👑", text, time: nowTime(), colour: HOST_COLOUR,
   });
   input.value = "";
 }
@@ -269,8 +269,6 @@ function appendChat(name, text, time, colour) {
   box.scrollTop = box.scrollHeight;
 }
 
-// ── Copy URL ───────────────────────────────────────────────────────────
-
 function copyURL() {
   const url = document.getElementById("watch-url").value;
   navigator.clipboard.writeText(url).then(() => {
@@ -278,8 +276,6 @@ function copyURL() {
     setTimeout(() => setStatus("copy-status", "", ""), 2500);
   });
 }
-
-// ── Socket: viewer list + chat ─────────────────────────────────────────
 
 socket.on("viewer_update", (data) => {
   document.getElementById("viewer-count").textContent = data.count;
