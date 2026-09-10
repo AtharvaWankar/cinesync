@@ -7,6 +7,18 @@
 </head>
 <body class="host-body">
 
+<!-- Episode request popup -->
+<div id="episode-popup" class="episode-popup" style="display:none">
+  <div class="episode-popup-inner">
+    <div class="episode-popup-title">📺 Episode Request</div>
+    <div class="episode-popup-msg" id="episode-popup-msg"></div>
+    <div class="episode-popup-buttons">
+      <button class="btn btn-play" onclick="approveEpisode()">✓ Accept</button>
+      <button class="btn btn-secondary" onclick="rejectEpisode()">✗ Reject</button>
+    </div>
+  </div>
+</div>
+
 <div class="host-container">
 
   <!-- Header -->
@@ -74,7 +86,6 @@
       <button class="btn btn-pause" id="btn-pause" onclick="hostPause()" disabled>⏸ Pause</button>
     </div>
 
-    <!-- Timeline -->
     <div class="timeline-wrap">
       <span id="current-time">0:00</span>
       <input type="range" id="timeline" min="0" max="100" value="0"
@@ -84,7 +95,6 @@
       <span id="total-time">0:00</span>
     </div>
 
-    <!-- Host's own video (hidden, drives sync) -->
     <video id="host-video" src="/video" style="display:none"
            onloadedmetadata="onVideoLoaded()"
            ontimeupdate="onTimeUpdate()">

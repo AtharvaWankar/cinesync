@@ -13,7 +13,6 @@ from server.video_server import video_bp
 from server.sync_server import register_events
 from server.network import get_tailscale_ip, get_watch_url
 
-# ── App setup ──────────────────────────────────────────────────────────
 app = Flask(__name__)
 app.config["SECRET_KEY"] = "cinesync-secret-2024"
 
@@ -25,12 +24,9 @@ socketio = SocketIO(
     engineio_logger=False,
 )
 
-# ── Register blueprints & socket events ───────────────────────────────
 app.register_blueprint(video_bp)
 register_events(socketio)
 
-
-# ── Routes ─────────────────────────────────────────────────────────────
 
 @app.route("/")
 def host_panel():
@@ -76,12 +72,17 @@ def load_movie():
     state.set_movie(path)
     state.party_active = True
     print(f"[MOVIE] Loaded: {path}")
+
+    socketio.emit("movie_changed", {
+        "movie_name":    state.movie_name,
+        "has_subtitles": state.subtitle_path is not None,
+    }, room="watch_party")
+
     return jsonify({"ok": True, "movie_name": state.movie_name})
 
 
 @app.route("/api/load_subtitles", methods=["POST"])
 def load_subtitles():
-    """Host loads an .srt subtitle file."""
     data = request.get_json()
     path = data.get("path", "").strip()
 
@@ -102,7 +103,6 @@ def load_subtitles():
 
 @app.route("/api/browse_movie")
 def browse_movie():
-    """Open native Windows file picker, return the selected path."""
     root = tk.Tk()
     root.withdraw()
     root.wm_attributes("-topmost", True)
@@ -129,12 +129,17 @@ def browse_movie():
     state.set_movie(path)
     state.party_active = True
     print(f"[MOVIE] Loaded: {path}")
+
+    socketio.emit("movie_changed", {
+        "movie_name":    state.movie_name,
+        "has_subtitles": state.subtitle_path is not None,
+    }, room="watch_party")
+
     return jsonify({"ok": True, "movie_name": state.movie_name, "path": path})
 
 
 @app.route("/api/browse_subtitle")
 def browse_subtitle():
-    """Open native Windows file picker for .srt files."""
     root = tk.Tk()
     root.withdraw()
     root.wm_attributes("-topmost", True)
@@ -159,12 +164,92 @@ def browse_subtitle():
     return jsonify({"ok": True, "path": path})
 
 
+@app.route("/api/folder_contents")
+def folder_contents():
+    """Return video files and subfolders in the current movie's directory."""
+    if not state.movie_path:
+        return jsonify({"ok": False, "error": "No movie loaded."}), 400
+
+    # Allow navigating to a subfolder
+    subfolder = request.args.get("path", "")
+    base_dir  = os.path.dirname(state.movie_path)
+
+    if subfolder:
+        target = os.path.normpath(os.path.join(base_dir, subfolder))
+        # Security: never allow navigating above the base directory
+        if not target.startswith(base_dir):
+            return jsonify({"ok": False, "error": "Access denied."}), 403
+    else:
+        target = base_dir
+
+    try:
+        entries = os.scandir(target)
+        folders = []
+        files   = []
+
+        for entry in sorted(entries, key=lambda e: e.name.lower()):
+            if entry.is_dir():
+                folders.append({
+                    "name":     entry.name,
+                    "type":     "folder",
+                    "rel_path": os.path.relpath(entry.path, base_dir),
+                })
+            elif entry.is_file():
+                ext = os.path.splitext(entry.name)[1].lower()
+                if ext in SUPPORTED_FORMATS:
+                    files.append({
+                        "name":      entry.name,
+                        "type":      "file",
+                        "full_path": entry.path,
+                        "active":    entry.path == state.movie_path,
+                    })
+
+        # Show parent folder navigation if we're in a subfolder
+        parent = None
+        if target != base_dir:
+            parent = os.path.relpath(os.path.dirname(target), base_dir)
+            if parent == ".":
+                parent = ""
+
+        return jsonify({
+            "ok":      True,
+            "folders": folders,
+            "files":   files,
+            "current": os.path.basename(target),
+            "parent":  parent,
+        })
+
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/approve_episode", methods=["POST"])
+def approve_episode():
+    """Host approves a viewer's episode request — loads and broadcasts."""
+    data = request.get_json()
+    path = data.get("path", "").strip()
+
+    if not path or not os.path.isfile(path):
+        return jsonify({"ok": False, "error": "File not found."}), 400
+
+    ext = os.path.splitext(path)[1].lower()
+    if ext not in SUPPORTED_FORMATS:
+        return jsonify({"ok": False, "error": "Unsupported format."}), 400
+
+    state.set_movie(path)
+    state.party_active = True
+    print(f"[EPISODE] Approved: {path}")
+
+    socketio.emit("movie_changed", {
+        "movie_name":    state.movie_name,
+        "has_subtitles": state.subtitle_path is not None,
+    }, room="watch_party")
+
+    return jsonify({"ok": True, "movie_name": state.movie_name})
+
+
 @app.route("/subtitles")
 def serve_subtitles():
-    """
-    Convert .srt to .vtt on the fly and serve it.
-    Browsers only understand .vtt — we convert in memory, no temp files needed.
-    """
     if not state.subtitle_path or not os.path.isfile(state.subtitle_path):
         abort(404)
 
@@ -172,12 +257,10 @@ def serve_subtitles():
         srt_content = f.read()
 
     vtt = srt_to_vtt(srt_content)
-
     return Response(vtt, mimetype="text/vtt")
 
 
 def srt_to_vtt(srt: str) -> str:
-    """Convert SRT subtitle format to WebVTT format in memory."""
     vtt = re.sub(r"(\d{2}:\d{2}:\d{2}),(\d{3})", r"\1.\2", srt)
     vtt = vtt.replace("\r\n", "\n").replace("\r", "\n")
     return "WEBVTT\n\n" + vtt.strip()
@@ -196,8 +279,6 @@ def api_status():
         "has_subtitles": state.subtitle_path is not None,
     })
 
-
-# ── Boot ───────────────────────────────────────────────────────────────
 
 def open_host_browser():
     import time

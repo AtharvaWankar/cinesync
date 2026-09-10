@@ -5,10 +5,11 @@ const totalTimeEl   = document.getElementById("total-time");
 const btnPlay  = document.getElementById("btn-play");
 const btnPause = document.getElementById("btn-pause");
 
-const HOST_COLOUR = "#f0c040"; // gold — always host's colour
+const HOST_COLOUR = "#f0c040";
 
-let isDragging  = false;
-let movieLoaded = false;
+let isDragging        = false;
+let movieLoaded       = false;
+let pendingEpisodePath = null;
 
 // ── Utilities ──────────────────────────────────────────────────────────
 
@@ -45,6 +46,58 @@ function escHtml(str) {
   return str.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 }
 
+// ── Episode request popup ──────────────────────────────────────────────
+
+socket.on("episode_request", (data) => {
+  pendingEpisodePath = data.full_path;
+  document.getElementById("episode-popup-msg").textContent =
+    `${data.viewer_name} wants to watch "${data.file_name}"`;
+  document.getElementById("episode-popup").style.display = "flex";
+});
+
+async function approveEpisode() {
+  if (!pendingEpisodePath) return;
+  document.getElementById("episode-popup").style.display = "none";
+
+  try {
+    const res  = await fetch("/api/approve_episode", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: pendingEpisodePath }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      onMovieLoaded(data.movie_name);
+    }
+  } catch (e) {
+    console.error("approve_episode failed:", e);
+  }
+
+  pendingEpisodePath = null;
+}
+
+function rejectEpisode() {
+  document.getElementById("episode-popup").style.display = "none";
+  pendingEpisodePath = null;
+}
+
+// ── After movie loads ──────────────────────────────────────────────────
+
+function onMovieLoaded(movie_name) {
+  document.getElementById("movie-loaded-name").textContent = `🎬 ${movie_name}`;
+  enableControls();
+  movieLoaded = true;
+  setBadge("● Party Active", true);
+
+  video.pause();
+  video.src = "/video?" + Date.now();
+  video.load();
+
+  timeline.value = 0;
+  currentTimeEl.textContent = "0:00";
+  totalTimeEl.textContent   = "0:00";
+}
+
 // ── Native File Browser ────────────────────────────────────────────────
 
 async function browseMovie() {
@@ -53,19 +106,11 @@ async function browseMovie() {
     const res  = await fetch("/api/browse_movie");
     const data = await res.json();
 
-    if (data.cancelled) {
-      setStatus("load-status", "", "");
-      return;
-    }
+    if (data.cancelled) { setStatus("load-status", "", ""); return; }
     if (data.ok) {
       document.getElementById("movie-path").value = data.path;
       setStatus("load-status", `✓ Loaded: ${data.movie_name}`, "ok");
-      document.getElementById("movie-loaded-name").textContent = `🎬 ${data.movie_name}`;
-      enableControls();
-      movieLoaded = true;
-      setBadge("● Party Active", true);
-      video.src = "/video";
-      video.load();
+      onMovieLoaded(data.movie_name);
     } else {
       setStatus("load-status", `✗ ${data.error}`, "error");
     }
@@ -80,10 +125,7 @@ async function browseSubtitle() {
     const res  = await fetch("/api/browse_subtitle");
     const data = await res.json();
 
-    if (data.cancelled) {
-      setStatus("subtitle-status", "", "");
-      return;
-    }
+    if (data.cancelled) { setStatus("subtitle-status", "", ""); return; }
     if (data.ok) {
       document.getElementById("subtitle-path").value = data.path;
       setStatus("subtitle-status", "✓ Subtitles loaded!", "ok");
@@ -97,8 +139,6 @@ async function browseSubtitle() {
     setStatus("subtitle-status", "✗ Server error.", "error");
   }
 }
-
-// ── Load Movie (manual path) ───────────────────────────────────────────
 
 async function loadMovie() {
   const path = document.getElementById("movie-path").value.trim();
@@ -114,12 +154,7 @@ async function loadMovie() {
     const data = await res.json();
     if (data.ok) {
       setStatus("load-status", `✓ Loaded: ${data.movie_name}`, "ok");
-      document.getElementById("movie-loaded-name").textContent = `🎬 ${data.movie_name}`;
-      enableControls();
-      movieLoaded = true;
-      setBadge("● Party Active", true);
-      video.src = "/video";
-      video.load();
+      onMovieLoaded(data.movie_name);
     } else {
       setStatus("load-status", `✗ ${data.error}`, "error");
     }
@@ -133,8 +168,6 @@ function enableControls() {
   btnPause.disabled  = false;
   timeline.disabled  = false;
 }
-
-// ── Load Subtitles (manual path) ───────────────────────────────────────
 
 async function loadSubtitles() {
   const path = document.getElementById("subtitle-path").value.trim();
@@ -178,8 +211,6 @@ async function clearSubtitles() {
   }
 }
 
-// ── Video metadata ─────────────────────────────────────────────────────
-
 function onVideoLoaded() {
   timeline.max = Math.floor(video.duration);
   totalTimeEl.textContent = formatTime(video.duration);
@@ -190,8 +221,6 @@ function onTimeUpdate() {
   timeline.value = Math.floor(video.currentTime);
   currentTimeEl.textContent = formatTime(video.currentTime);
 }
-
-// ── Timeline ───────────────────────────────────────────────────────────
 
 function onTimelineDrag(val) {
   isDragging = true;
@@ -205,8 +234,6 @@ function onTimelineSeek(val) {
   socket.emit("host_seek", { timestamp: ts, name: "Host 👑" });
 }
 
-// ── Play / Pause ───────────────────────────────────────────────────────
-
 function hostPlay() {
   if (!movieLoaded) return;
   video.play();
@@ -219,38 +246,27 @@ function hostPause() {
   socket.emit("host_pause", { timestamp: video.currentTime });
 }
 
-// ── Receive sync events from viewers ──────────────────────────────────
-
 socket.on("sync_play", (data) => {
-  if (Math.abs(video.currentTime - data.timestamp) > 1.5) {
+  if (Math.abs(video.currentTime - data.timestamp) > 1.5)
     video.currentTime = data.timestamp;
-  }
   video.play();
 });
 
 socket.on("sync_pause", (data) => {
   video.pause();
-  if (Math.abs(video.currentTime - data.timestamp) > 1.5) {
+  if (Math.abs(video.currentTime - data.timestamp) > 1.5)
     video.currentTime = data.timestamp;
-  }
 });
 
 socket.on("sync_seek", (data) => {
   video.currentTime = data.timestamp;
 });
 
-// ── Chat ───────────────────────────────────────────────────────────────
-
 function sendChat() {
   const input = document.getElementById("chat-input");
   const text  = input.value.trim();
   if (!text) return;
-  socket.emit("chat_message", {
-    name:   "Host 👑",
-    text:   text,
-    time:   nowTime(),
-    colour: HOST_COLOUR,
-  });
+  socket.emit("chat_message", { name: "Host 👑", text, time: nowTime(), colour: HOST_COLOUR });
   input.value = "";
 }
 
@@ -269,8 +285,6 @@ function appendChat(name, text, time, colour) {
   box.scrollTop = box.scrollHeight;
 }
 
-// ── Copy URL ───────────────────────────────────────────────────────────
-
 function copyURL() {
   const url = document.getElementById("watch-url").value;
   navigator.clipboard.writeText(url).then(() => {
@@ -278,8 +292,6 @@ function copyURL() {
     setTimeout(() => setStatus("copy-status", "", ""), 2500);
   });
 }
-
-// ── Socket: viewer list + chat ─────────────────────────────────────────
 
 socket.on("viewer_update", (data) => {
   document.getElementById("viewer-count").textContent = data.count;

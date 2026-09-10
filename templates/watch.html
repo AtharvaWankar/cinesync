@@ -7,7 +7,6 @@
 </head>
 <body class="watch-body">
 
-<!-- Name prompt overlay -->
 <div id="name-overlay" class="overlay">
   <div class="overlay-box">
     <div class="logo">🎬 CineSync</div>
@@ -19,10 +18,8 @@
   </div>
 </div>
 
-<!-- Main watch layout -->
 <div class="watch-container" id="watch-container" style="display:none">
 
-  <!-- Video -->
   <div class="video-wrap">
     <video id="viewer-video" src="/video" preload="metadata">
       {% if has_subtitles %}
@@ -31,7 +28,6 @@
       Your browser does not support HTML5 video.
     </video>
 
-    <!-- Viewer controls bar -->
     <div class="viewer-controls">
       <button class="ctrl-btn ctrl-btn--toggle" id="v-btn-toggle" onclick="viewerToggle()">▶</button>
       <span id="v-current-time" class="time-display">0:00</span>
@@ -55,10 +51,8 @@
     </div>
   </div>
 
-  <!-- Sidebar -->
   <aside class="sidebar" id="sidebar">
 
-    <!-- Collapse toggle button -->
     <button class="sidebar-toggle" id="sidebar-toggle" onclick="toggleSidebar()" title="Toggle chat">
       <span id="toggle-icon">»</span>
     </button>
@@ -77,6 +71,21 @@
         <div id="viewer-list" class="viewer-list-side"></div>
       </div>
 
+      <!-- Files section -->
+      <div class="files-section" id="files-section">
+        <div class="files-header" onclick="toggleFiles()">
+          <span class="section-label">Files</span>
+          <span class="files-chevron" id="files-chevron">▶</span>
+        </div>
+        <div class="files-body" id="files-body">
+          <div class="files-inner">
+            <div id="files-list" class="files-list">
+              <div class="files-empty">Load a movie to browse files</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Chat -->
       <div class="chat-section">
         <div class="section-label">Chat</div>
@@ -93,11 +102,10 @@
 
   </aside>
 
-  <!-- Seek toast -->
   <div id="seek-toast" class="seek-toast"></div>
-    <!-- Out of sync indicator -->
   <div id="sync-indicator" class="sync-indicator"></div>
-</div><!-- end watch-container -->
+
+</div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
 <script>
@@ -106,7 +114,6 @@
     const icon      = document.getElementById("toggle-icon");
     const isCollapsed = container.classList.toggle("sidebar-collapsed");
     icon.textContent = isCollapsed ? "«" : "»";
-
   }
 
   const socket = io({
