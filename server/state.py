@@ -1,5 +1,7 @@
+import os
 import random
 import threading
+from collections import deque
 
 COLOUR_PALETTE = [
     "#7c6ff7",
@@ -24,18 +26,28 @@ class PartyState:
         self.timestamp     = 0.0
         self.viewers       = {}
         self.party_active  = False
-        self.chat_history  = []
+        self.chat_history  = deque(maxlen=100)
         self._used_colours = []
+        self.manual_tailscale_ip = None
+        self.library_root  = None
+
+    # ── Network override ──────────────────────────────────────────────
+    def set_manual_ip(self, ip: str | None):
+        with self._lock:
+            self.manual_tailscale_ip = ip or None
+
+    # ── Library ────────────────────────────────────────────────────────
+    def set_library_root(self, path: str):
+        with self._lock:
+            self.library_root = path
 
     # ── Movie ──────────────────────────────────────────────────────────
     def set_movie(self, path: str):
         with self._lock:
             self.movie_path = path
-            self.movie_name = path.split("\\")[-1].split("/")[-1]
-            # Always reset playback state on new movie
+            self.movie_name = os.path.basename(path)  # cross-platform filename
             self.timestamp  = 0.0
             self.is_playing = False
-            # Reset all viewer timestamps too
             for sid in self.viewers:
                 self.viewers[sid]["timestamp"] = 0.0
 
@@ -67,7 +79,7 @@ class PartyState:
     def _assign_colour(self) -> str:
         available = [c for c in COLOUR_PALETTE if c not in self._used_colours]
         if not available:
-            available = COLOUR_PALETTE
+            available = list(COLOUR_PALETTE)  # all used — reset pool
         colour = random.choice(available)
         self._used_colours.append(colour)
         return colour
@@ -93,16 +105,19 @@ class PartyState:
             return self.viewers.get(sid, {}).get("colour", "#e8e8f0")
 
     def viewer_count(self) -> int:
-        return len(self.viewers)
+        with self._lock:
+            return len(self.viewers)
 
     def viewer_names(self) -> list:
-        return [v["name"] for v in self.viewers.values()]
+        with self._lock:
+            return [v["name"] for v in self.viewers.values()]
 
     def viewers_with_timestamp(self) -> list:
-        return [
-            {"name": v["name"], "timestamp": v["timestamp"], "colour": v["colour"]}
-            for v in self.viewers.values()
-        ]
+        with self._lock:
+            return [
+                {"name": v["name"], "timestamp": v["timestamp"], "colour": v["colour"]}
+                for v in self.viewers.values()
+            ]
 
     # ── Chat history ───────────────────────────────────────────────────
     def add_chat_message(self, name: str, text: str, time: str, colour: str):
@@ -111,8 +126,7 @@ class PartyState:
                 "name": name, "text": text,
                 "time": time, "colour": colour,
             })
-            if len(self.chat_history) > 100:
-                self.chat_history = self.chat_history[-100:]
+            # deque(maxlen=100) automatically drops oldest — no manual trim needed
 
     def get_chat_history(self) -> list:
         with self._lock:

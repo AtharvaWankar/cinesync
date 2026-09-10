@@ -72,35 +72,61 @@ function toggleFullscreen() {
   }
 }
 
-// ── Auto-hide controls in fullscreen ──────────────────────────────────
+// ── Auto-hide controls (video area) ─────────────────────────────────────
+// The bar always fades out — and slides down out of the way of the
+// subtitles — after exactly 3 seconds of the mouse doing nothing over
+// the video. It comes back on any movement, and won't hide out from
+// under you while you're actually pointing at it or dragging a slider.
+
+const HIDE_DELAY_MS = 3000;
 
 let controlsTimer = null;
+const videoWrapEl = document.querySelector(".video-wrap");
+const controlsEl  = document.querySelector(".viewer-controls");
 
-function showControls() {
-  const controls = document.querySelector(".viewer-controls");
-  controls.classList.remove("controls-hidden");
-  document.body.style.cursor = "";
+function scheduleHide() {
   clearTimeout(controlsTimer);
   controlsTimer = setTimeout(() => {
-    if (document.fullscreenElement) {
-      controls.classList.add("controls-hidden");
-      document.body.style.cursor = "none";
-    }
-  }, 4000);
+    if (isDragging) { scheduleHide(); return; }
+    controlsEl.classList.add("controls-hidden");
+    if (document.fullscreenElement) document.body.style.cursor = "none";
+  }, HIDE_DELAY_MS);
+}
+
+function showControls() {
+  controlsEl.classList.remove("controls-hidden");
+  if (document.fullscreenElement) document.body.style.cursor = "";
+  scheduleHide();
 }
 
 document.addEventListener("fullscreenchange", () => {
-  if (document.fullscreenElement) {
-    showControls();
-  } else {
-    clearTimeout(controlsTimer);
-    document.querySelector(".viewer-controls").classList.remove("controls-hidden");
-    document.body.style.cursor = "";
-  }
+  document.body.style.cursor = "";
+  showControls();
 });
 
-document.addEventListener("mousemove", () => {
-  if (document.fullscreenElement) showControls();
+if (videoWrapEl) {
+  videoWrapEl.addEventListener("mousemove", showControls);
+  videoWrapEl.addEventListener("mouseenter", showControls);
+  videoWrapEl.addEventListener("mouseleave", () => {
+    // Cursor left the video entirely — no reason to wait the full delay.
+    clearTimeout(controlsTimer);
+    controlsTimer = setTimeout(() => controlsEl.classList.add("controls-hidden"), 300);
+  });
+}
+
+// Resting the pointer on the bar itself (adjusting volume, scrubbing)
+// pauses the countdown; moving off it resumes the normal 3s countdown.
+controlsEl.addEventListener("mouseenter", () => clearTimeout(controlsTimer));
+controlsEl.addEventListener("mouseleave", scheduleHide);
+
+// One-off entrance: fade the bar in on load, then start the normal
+// 3-second auto-hide countdown once it's finished appearing.
+controlsEl.classList.add("controls-intro");
+controlsEl.addEventListener("animationend", function onIntroEnd(e) {
+  if (e.animationName !== "controls-intro-fade") return;
+  controlsEl.classList.remove("controls-intro");
+  controlsEl.removeEventListener("animationend", onIntroEnd);
+  scheduleHide();
 });
 
 // ── Toggle button state ────────────────────────────────────────────────
@@ -191,7 +217,7 @@ function onViewerTimelineSeek(val) {
 // ── Progress reporting ─────────────────────────────────────────────────
 
 setInterval(() => {
-  if (viewerName && !video.paused) {
+  if (viewerName && !video.paused && video.readyState >= 2) {
     socket.emit("viewer_progress", { timestamp: video.currentTime });
   }
 }, 1000);
@@ -321,12 +347,20 @@ socket.on("sync_seek", (data) => {
 // ── Subtitles ──────────────────────────────────────────────────────────
 
 socket.on("subtitles_updated", () => {
+  subtitleDelay = 0;  // reset delay when host pushes new subtitles
   const existing = video.querySelector("track");
   if (existing) existing.remove();
   const track = document.createElement("track");
   track.kind = "subtitles"; track.src = "/subtitles?" + Date.now();
   track.srclang = "en"; track.label = "Subtitles"; track.default = true;
   video.appendChild(track);
+
+  // Keep the Files panel's "Active" subtitle badge in sync for everyone
+  // in the party, not just whoever picked it.
+  const filesBody = document.getElementById("files-body");
+  if (filesBody && filesBody.classList.contains("files-open")) {
+    loadFolderContents(currentRelPath);
+  }
 });
 
 // ── Subtitle delay ─────────────────────────────────────────────────────
@@ -354,6 +388,7 @@ function showSubtitleToast() {
 // ── Movie changed ──────────────────────────────────────────────────────
 
 socket.on("movie_changed", (data) => {
+  subtitleDelay = 0;  // reset delay for new movie
   video.pause();
   video.src = "/video?" + Date.now();
   video.load();
@@ -519,7 +554,10 @@ function toggleFiles() {
   const chevron = document.getElementById("files-chevron");
   const isOpen  = body.classList.toggle("files-open");
   chevron.textContent = isOpen ? "▼" : "▶";
-  if (isOpen) loadFolderContents();
+  if (isOpen) {
+    currentRelPath = "";  // always start from root on open
+    loadFolderContents();
+  }
 }
 
 async function loadFolderContents(relPath) {
@@ -561,7 +599,7 @@ async function loadFolderContents(relPath) {
       list.appendChild(el);
     });
 
-    // Files
+    // Files (episodes)
     data.files.forEach(f => {
       const el = document.createElement("div");
       el.className = `file-item file-video${f.active ? " file-active" : ""}`;
@@ -572,8 +610,24 @@ async function loadFolderContents(relPath) {
       list.appendChild(el);
     });
 
-    if (data.folders.length === 0 && data.files.length === 0) {
-      list.innerHTML = `<div class="files-empty">No video files here</div>`;
+    // Subtitles — same folder as the episodes, pick one to load for
+    // everyone in the party.
+    (data.subtitles || []).forEach(s => {
+      const el = document.createElement("div");
+      el.className = `file-item file-subtitle${s.active ? " file-active" : ""}`;
+      el.innerHTML = `
+        <span class="file-icon">${s.active ? "✓" : "💬"}</span>
+        <span class="file-name">${escHtml(s.name)}</span>
+        <span class="file-tag">${s.active ? "Active" : "SRT"}</span>
+      `;
+      if (!s.active) {
+        el.onclick = () => applySubtitleFile(s.full_path, s.name);
+      }
+      list.appendChild(el);
+    });
+
+    if (data.folders.length === 0 && data.files.length === 0 && (data.subtitles || []).length === 0) {
+      list.innerHTML = `<div class="files-empty">No video or subtitle files here</div>`;
     }
 
   } catch (e) {
@@ -581,12 +635,39 @@ async function loadFolderContents(relPath) {
   }
 }
 
-function requestEpisode(fullPath, fileName) {
-  if (!viewerName) return;
-  socket.emit("episode_request", {
-    viewer_name: viewerName,
-    file_name:   fileName,
-    full_path:   fullPath,
-  });
-  showToastMessage(`📺 Requested: ${fileName}`);
+async function applySubtitleFile(fullPath, fileName) {
+  showToastMessage(`💬 Loading subtitles: ${fileName}`);
+  try {
+    const res  = await fetch("/api/load_subtitles", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: fullPath }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      socket.emit("subtitles_updated");
+      showToastMessage(`💬 Subtitles on: ${fileName}`);
+      if (currentRelPath !== undefined) loadFolderContents(currentRelPath);
+    } else {
+      showToastMessage(`✗ ${data.error}`);
+    }
+  } catch (e) {
+    showToastMessage("✗ Couldn't load subtitles — server unreachable.");
+  }
+}
+
+async function requestEpisode(fullPath, fileName) {
+  showToastMessage(`▶ Switching to: ${fileName}`);
+  try {
+    const res  = await fetch("/api/load_movie", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: fullPath }),
+    });
+    const data = await res.json();
+    if (!data.ok) showToastMessage(`✗ ${data.error}`);
+    // success case is handled by the movie_changed broadcast every client receives
+  } catch (e) {
+    showToastMessage("✗ Couldn't switch — server unreachable.");
+  }
 }

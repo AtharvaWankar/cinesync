@@ -98,26 +98,159 @@ function onMovieLoaded(movie_name) {
   totalTimeEl.textContent   = "0:00";
 }
 
-// ── Native File Browser ────────────────────────────────────────────────
+// ── Library (folder-based movie picker) ─────────────────────────────────
 
-async function browseMovie() {
-  setStatus("load-status", "Opening file browser...", "");
+let libraryRoot   = null;
+let libraryPath   = "";   // relative path within the root, "" = top level
+
+function libIcon(name) {
+  const ext = (name.split(".").pop() || "").toLowerCase();
+  return "🎬";
+}
+
+function renderLibrary(data) {
+  const grid  = document.getElementById("library-grid");
+  const empty = document.getElementById("library-empty");
+  const crumbWrap = document.getElementById("library-breadcrumb");
+  const crumbCurrent = document.getElementById("crumb-current");
+
+  const hasContent = (data.folders && data.folders.length) || (data.files && data.files.length);
+  grid.style.display = hasContent ? "grid" : "none";
+  empty.style.display = hasContent ? "none" : "block";
+  empty.textContent = "This folder has no video files or subfolders.";
+
+  crumbWrap.style.display = libraryRoot ? "flex" : "none";
+  crumbCurrent.textContent = data.current || "";
+  document.getElementById("crumb-back").disabled = !data.parent && data.parent !== "";
+  document.getElementById("crumb-back").style.visibility =
+    (libraryPath === "" ) ? "hidden" : "visible";
+
+  const tiles = [];
+
+  (data.folders || []).forEach((f, i) => {
+    tiles.push(`
+      <div class="tile tile-folder" style="--i:${i}" onclick="libraryOpenFolder('${escAttr(f.rel_path)}')">
+        <div class="tile-art tile-art-folder">📁</div>
+        <div class="tile-label">${escHtml(f.name)}</div>
+      </div>
+    `);
+  });
+
+  (data.files || []).forEach((f, i) => {
+    const activeClass = f.active ? " tile-active" : "";
+    tiles.push(`
+      <div class="tile tile-movie${activeClass}" style="--i:${(data.folders||[]).length + i}" onclick="librarySelectMovie('${escAttr(f.full_path)}')">
+        <div class="tile-art tile-art-movie">
+          <span class="tile-play">▶</span>
+          <span class="tile-glow"></span>
+        </div>
+        <div class="tile-label">${escHtml(f.name)}</div>
+        ${f.active ? '<div class="tile-now">Now Playing</div>' : ""}
+      </div>
+    `);
+  });
+
+  grid.innerHTML = tiles.join("");
+}
+
+function escAttr(str) {
+  return String(str).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+}
+
+async function browseFolder() {
+  setStatus("library-status", "Opening folder browser...", "");
   try {
-    const res  = await fetch("/api/browse_movie");
+    const res  = await fetch("/api/browse_folder");
     const data = await res.json();
 
-    if (data.cancelled) { setStatus("load-status", "", ""); return; }
+    if (data.cancelled) { setStatus("library-status", "", ""); return; }
     if (data.ok) {
-      document.getElementById("movie-path").value = data.path;
-      setStatus("load-status", `✓ Loaded: ${data.movie_name}`, "ok");
-      onMovieLoaded(data.movie_name);
+      libraryRoot = data.root;
+      libraryPath = "";
+      document.getElementById("library-path-input").value = data.root;
+      setStatus("library-status", `✓ Library: ${data.root}`, "ok");
+      renderLibrary(data);
     } else {
-      setStatus("load-status", `✗ ${data.error}`, "error");
+      setStatus("library-status", `✗ ${data.error}`, "error");
     }
   } catch (e) {
-    setStatus("load-status", "✗ Server error.", "error");
+    setStatus("library-status", "✗ Server error.", "error");
   }
 }
+
+async function setLibraryPathManual() {
+  const path = document.getElementById("library-path-input").value.trim();
+  if (!path) { setStatus("library-status", "Please enter a folder path.", "error"); return; }
+
+  setStatus("library-status", "Opening…", "");
+  try {
+    const res  = await fetch("/api/set_library_path", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      libraryRoot = data.root;
+      libraryPath = "";
+      setStatus("library-status", `✓ Library: ${data.root}`, "ok");
+      renderLibrary(data);
+    } else {
+      setStatus("library-status", `✗ ${data.error}`, "error");
+    }
+  } catch (e) {
+    setStatus("library-status", "✗ Server error.", "error");
+  }
+}
+
+async function libraryFetch(relPath) {
+  const url = relPath
+    ? `/api/folder_contents?path=${encodeURIComponent(relPath)}`
+    : "/api/folder_contents";
+  const res  = await fetch(url);
+  const data = await res.json();
+  if (data.ok) {
+    libraryPath = relPath;
+    renderLibrary(data);
+  } else {
+    setStatus("library-status", `✗ ${data.error}`, "error");
+  }
+}
+
+function libraryOpenFolder(relPath) {
+  libraryFetch(relPath);
+}
+
+function libraryGoUp() {
+  if (libraryPath === "") return;
+  const parent = libraryPath.includes("/") || libraryPath.includes("\\")
+    ? libraryPath.replace(/[\\/][^\\/]*$/, "")
+    : "";
+  libraryFetch(parent === libraryPath ? "" : parent);
+}
+
+async function librarySelectMovie(fullPath) {
+  setStatus("library-status", "Loading…", "");
+  try {
+    const res  = await fetch("/api/load_movie", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: fullPath }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      setStatus("library-status", `✓ Now playing: ${data.movie_name}`, "ok");
+      onMovieLoaded(data.movie_name);
+      libraryFetch(libraryPath); // refresh grid so the active tile updates
+    } else {
+      setStatus("library-status", `✗ ${data.error}`, "error");
+    }
+  } catch (e) {
+    setStatus("library-status", "✗ Server error.", "error");
+  }
+}
+
+// ── Native File Browser (subtitles) ─────────────────────────────────────
 
 async function browseSubtitle() {
   setStatus("subtitle-status", "Opening file browser...", "");
@@ -137,29 +270,6 @@ async function browseSubtitle() {
     }
   } catch (e) {
     setStatus("subtitle-status", "✗ Server error.", "error");
-  }
-}
-
-async function loadMovie() {
-  const path = document.getElementById("movie-path").value.trim();
-  if (!path) { setStatus("load-status", "Please enter a file path.", "error"); return; }
-
-  setStatus("load-status", "Loading...", "");
-  try {
-    const res  = await fetch("/api/load_movie", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path }),
-    });
-    const data = await res.json();
-    if (data.ok) {
-      setStatus("load-status", `✓ Loaded: ${data.movie_name}`, "ok");
-      onMovieLoaded(data.movie_name);
-    } else {
-      setStatus("load-status", `✗ ${data.error}`, "error");
-    }
-  } catch (e) {
-    setStatus("load-status", "✗ Server error.", "error");
   }
 }
 
@@ -291,6 +401,42 @@ function copyURL() {
     setStatus("copy-status", "✓ Copied to clipboard!", "ok");
     setTimeout(() => setStatus("copy-status", "", ""), 2500);
   });
+}
+
+async function retryTailscaleDetect() {
+  setStatus("tailscale-status", "Detecting…", "ok");
+  try {
+    const res = await fetch("/api/redetect_tailscale");
+    const data = await res.json();
+    if (data.effective_ip) {
+      document.getElementById("watch-url").value = data.watch_url;
+      setStatus("tailscale-status", `✓ Found it: ${data.effective_ip} — reload the page to clear the warning.`, "ok");
+    } else {
+      setStatus("tailscale-status", "Still nothing found. Make sure Tailscale is running, or enter the IP manually below.", "error");
+    }
+  } catch (e) {
+    setStatus("tailscale-status", "Couldn't reach the server to retry.", "error");
+  }
+}
+
+async function saveManualIp() {
+  const ip = document.getElementById("manual-ip-input").value.trim();
+  try {
+    const res = await fetch("/api/set_watch_ip", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ip }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      document.getElementById("watch-url").value = data.watch_url;
+      setStatus("tailscale-status", "✓ Watch URL updated.", "ok");
+    } else {
+      setStatus("tailscale-status", data.error || "Couldn't save that IP.", "error");
+    }
+  } catch (e) {
+    setStatus("tailscale-status", "Couldn't reach the server.", "error");
+  }
 }
 
 socket.on("viewer_update", (data) => {

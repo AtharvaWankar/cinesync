@@ -2,10 +2,17 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>CineSync — {{ movie_name }}</title>
   <link rel="stylesheet" href="/static/css/style.css"/>
 </head>
 <body class="watch-body">
+
+<div class="bg-aurora">
+  <span class="blob blob-a"></span>
+  <span class="blob blob-b"></span>
+  <span class="blob blob-c"></span>
+</div>
 
 <div id="name-overlay" class="overlay">
   <div class="overlay-box">
@@ -31,10 +38,11 @@
     <div class="viewer-controls">
       <button class="ctrl-btn ctrl-btn--toggle" id="v-btn-toggle" onclick="viewerToggle()">▶</button>
       <span id="v-current-time" class="time-display">0:00</span>
-      <input type="range" id="v-timeline" min="0" max="100" value="0" step="10"
+      <input type="range" id="v-timeline" min="0" max="100" value="0" step="1"
              oninput="onViewerTimelineDrag(this.value)"
              onchange="onViewerTimelineSeek(this.value)"/>
       <span id="v-total-time" class="time-display">0:00</span>
+      <button class="ctrl-btn ctrl-btn--stats" id="v-btn-stats" onclick="toggleStatsPanel()" title="Stats for nerds">ⓘ</button>
       <div class="vol-wrap">
         <span class="vol-icon" onclick="toggleMute()">🔊</span>
         <div class="vol-slider-wrap">
@@ -48,6 +56,16 @@
     <div id="sync-overlay" class="sync-overlay" style="display:none">
       <div class="spinner"></div>
       <span>Syncing...</span>
+    </div>
+
+    <div id="stats-panel" class="stats-panel" style="display:none">
+      <div class="stats-panel-header">
+        <span>📊 Stats for Nerds</span>
+        <span class="stats-close" onclick="toggleStatsPanel()">✕</span>
+      </div>
+      <div class="stats-panel-body" id="stats-panel-body">
+        <div class="stats-loading">Loading…</div>
+      </div>
     </div>
   </div>
 
@@ -127,5 +145,6 @@
   socket.on("connect_error", (e) => console.error("[Socket] Error:", e.message));
 </script>
 <script src="/static/js/viewer.js"></script>
+<script src="/static/js/stats.js"></script>
 </body>
 </html>

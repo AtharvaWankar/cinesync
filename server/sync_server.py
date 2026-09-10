@@ -7,7 +7,7 @@ def register_events(socketio: SocketIO):
 
     @socketio.on("connect")
     def on_connect():
-        join_room(ROOM)
+        pass  # Room join deferred to viewer_join after capacity check
 
     @socketio.on("viewer_join")
     def on_viewer_join(data):
@@ -18,7 +18,9 @@ def register_events(socketio: SocketIO):
             emit("join_rejected", {"reason": f"Party is full (max {MAX_VIEWERS} viewers)."})
             return
 
-        name = data.get("name", "Friend")
+        join_room(ROOM)  # Only join AFTER passing capacity check
+
+        name = (data.get("name", "") or "Friend").strip()[:30]
         state.add_viewer(req.sid, name)
         colour = state.get_viewer_colour(req.sid)
 
@@ -45,24 +47,28 @@ def register_events(socketio: SocketIO):
 
     @socketio.on("host_play")
     def on_play(data):
+        from flask import request as req
         ts = float(data.get("timestamp", 0))
         state.play(ts)
-        socketio.emit("sync_play", {"timestamp": ts}, room=ROOM)
+        # skip_sid so the sender doesn't receive their own echo
+        socketio.emit("sync_play", {"timestamp": ts}, room=ROOM, skip_sid=req.sid)
         print(f"[PLAY]  timestamp={ts:.2f}s")
 
     @socketio.on("host_pause")
     def on_pause(data):
+        from flask import request as req
         ts = float(data.get("timestamp", 0))
         state.pause(ts)
-        socketio.emit("sync_pause", {"timestamp": ts}, room=ROOM)
+        socketio.emit("sync_pause", {"timestamp": ts}, room=ROOM, skip_sid=req.sid)
         print(f"[PAUSE] timestamp={ts:.2f}s")
 
     @socketio.on("host_seek")
     def on_seek(data):
+        from flask import request as req
         ts = float(data.get("timestamp", 0))
-        name = data.get("name", "Someone")
+        name = (data.get("name", "Someone") or "Someone").strip()[:30]
         state.seek(ts)
-        socketio.emit("sync_seek", {"timestamp": ts, "name": name}, room=ROOM)
+        socketio.emit("sync_seek", {"timestamp": ts, "name": name}, room=ROOM, skip_sid=req.sid)
         print(f"[SEEK]  {name} → {ts:.2f}s")
 
     @socketio.on("viewer_progress")
@@ -75,25 +81,16 @@ def register_events(socketio: SocketIO):
             "viewers": state.viewers_with_timestamp(),
         }, room=ROOM)
 
-    @socketio.on("movie_changed")
-    def on_movie_changed(data):
-        socketio.emit("movie_changed", {
-            "movie_name":    data.get("movie_name"),
-            "has_subtitles": data.get("has_subtitles", False),
-        }, room=ROOM)
-        print(f"[MOVIE] Changed to: {data.get('movie_name')}")
+    # NOTE: on_movie_changed handler removed — app.py emits movie_changed
+    # directly, so a socket handler here would cause a double broadcast.
 
-    # ── Episode request from viewer ────────────────────────────────────
     @socketio.on("episode_request")
     def on_episode_request(data):
-        """Viewer requests to switch episode — forward to host only."""
         from flask import request as req
-        viewer_name = data.get("viewer_name", "Someone")
+        viewer_name = (data.get("viewer_name", "Someone") or "Someone").strip()[:30]
         file_name   = data.get("file_name", "")
         full_path   = data.get("full_path", "")
         print(f"[EPISODE] {viewer_name} requested: {file_name}")
-        # Emit only to host (host is on localhost so its sid is in the room)
-        # We broadcast to whole room — host.js handles it, viewers ignore it
         socketio.emit("episode_request", {
             "viewer_name": viewer_name,
             "file_name":   file_name,
@@ -102,28 +99,30 @@ def register_events(socketio: SocketIO):
 
     @socketio.on("chat_message")
     def on_chat(data):
-        name   = data.get("name", "?")
-        text   = data.get("text", "").strip()[:300]
+        name   = (data.get("name", "?") or "?").strip()[:30]
+        text   = (data.get("text", "") or "").strip()[:300]
         time   = data.get("time", "")
         colour = data.get("colour", "#e8e8f0")
 
-        if text:
-            state.add_chat_message(name, text, time, colour)
-            socketio.emit("chat_message", {
-                "name": name, "text": text,
-                "time": time, "colour": colour,
-            }, room=ROOM)
+        if not text:
+            return
+
+        state.add_chat_message(name, text, time, colour)
+        socketio.emit("chat_message", {
+            "name": name, "text": text,
+            "time": time, "colour": colour,
+        }, room=ROOM)
 
     @socketio.on("typing_start")
     def on_typing_start(data):
         from flask import request as req
-        name = data.get("name", "Someone")
+        name = (data.get("name", "Someone") or "Someone").strip()[:30]
         socketio.emit("user_typing", {"name": name}, room=ROOM, skip_sid=req.sid)
 
     @socketio.on("typing_stop")
     def on_typing_stop(data):
         from flask import request as req
-        name = data.get("name", "Someone")
+        name = (data.get("name", "Someone") or "Someone").strip()[:30]
         socketio.emit("user_stopped_typing", {"name": name}, room=ROOM, skip_sid=req.sid)
 
     @socketio.on("ping_alive")

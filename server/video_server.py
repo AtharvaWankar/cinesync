@@ -15,23 +15,25 @@ def get_mime_type(path: str) -> str:
 def stream_video():
     """
     Stream the movie file using HTTP Range Requests.
-    This is how browsers natively stream video — they ask for byte ranges
-    so they can seek, buffer ahead, and play without downloading the whole file.
+    Browsers send Range headers to seek, buffer ahead, and play
+    without downloading the whole file.
     """
     if not state.movie_path or not os.path.exists(state.movie_path):
         abort(404, "No movie loaded or file not found.")
 
     file_size = os.path.getsize(state.movie_path)
     mime_type = get_mime_type(state.movie_path)
-
     range_header = request.headers.get("Range", None)
 
-    # ── No Range header: send the whole file (rarely happens with video) ──
+    # ── No Range header: send the whole file ──────────────────────────
     if not range_header:
         def generate_full():
-            with open(state.movie_path, "rb") as f:
-                while chunk := f.read(CHUNK_SIZE):
-                    yield chunk
+            try:
+                with open(state.movie_path, "rb") as f:
+                    while chunk := f.read(CHUNK_SIZE):
+                        yield chunk
+            except OSError as e:
+                print(f"[VIDEO] Read error: {e}")
 
         return Response(
             generate_full(),
@@ -39,7 +41,8 @@ def stream_video():
             mimetype=mime_type,
             headers={
                 "Content-Length": str(file_size),
-                "Accept-Ranges": "bytes",
+                "Accept-Ranges":  "bytes",
+                "Cache-Control":  "no-cache",
             }
         )
 
@@ -52,19 +55,30 @@ def stream_video():
     except Exception:
         abort(400, "Invalid Range header.")
 
-    byte_end    = min(byte_end, file_size - 1)
+    byte_end = min(byte_end, file_size - 1)
+
+    # Return 416 if the range is unsatisfiable
+    if byte_start > byte_end:
+        return Response(
+            status=416,
+            headers={"Content-Range": f"bytes */{file_size}"}
+        )
+
     byte_length = (byte_end - byte_start) + 1
 
     def generate_range():
-        with open(state.movie_path, "rb") as f:
-            f.seek(byte_start)
-            remaining = byte_length
-            while remaining > 0:
-                chunk = f.read(min(CHUNK_SIZE, remaining))
-                if not chunk:
-                    break
-                remaining -= len(chunk)
-                yield chunk
+        try:
+            with open(state.movie_path, "rb") as f:
+                f.seek(byte_start)
+                remaining = byte_length
+                while remaining > 0:
+                    chunk = f.read(min(CHUNK_SIZE, remaining))
+                    if not chunk:
+                        break
+                    remaining -= len(chunk)
+                    yield chunk
+        except OSError as e:
+            print(f"[VIDEO] Read error: {e}")
 
     return Response(
         generate_range(),
@@ -74,5 +88,6 @@ def stream_video():
             "Content-Range":  f"bytes {byte_start}-{byte_end}/{file_size}",
             "Content-Length": str(byte_length),
             "Accept-Ranges":  "bytes",
+            "Cache-Control":  "no-cache",
         }
     )
