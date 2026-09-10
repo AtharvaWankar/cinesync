@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>CineSync — Host</title>
+  <link rel="stylesheet" href="/static/css/style.css"/>
+</head>
+<body class="host-body">
+
+<div class="bg-aurora">
+  <span class="blob blob-a"></span>
+  <span class="blob blob-b"></span>
+  <span class="blob blob-c"></span>
+</div>
+
+<!-- Episode request popup -->
+<div id="episode-popup" class="episode-popup" style="display:none">
+  <div class="episode-popup-inner glass-panel">
+    <div class="episode-popup-title">📺 Episode Request</div>
+    <div class="episode-popup-msg" id="episode-popup-msg"></div>
+    <div class="episode-popup-buttons">
+      <button class="btn btn-play" onclick="approveEpisode()">✓ Accept</button>
+      <button class="btn btn-secondary" onclick="rejectEpisode()">✗ Reject</button>
+    </div>
+  </div>
+</div>
+
+<!-- Top glass nav -->
+<nav class="topnav">
+  <div class="topnav-inner">
+    <div class="logo"><span class="logo-mark">🎬</span> CineSync</div>
+    <div class="topnav-spacer"></div>
+    <div class="badge" id="status-badge">● Idle</div>
+  </div>
+</nav>
+
+<div class="host-container">
+
+  <!-- Library -->
+  <section class="card card-hero" id="card-library">
+    <div class="card-head">
+      <h2>Library</h2>
+      <p class="hint" id="library-hint">Point CineSync at the folder your movies live in — everything inside shows up here.</p>
+    </div>
+
+    <div class="library-toolbar">
+      <button class="btn btn-glass btn-lg" onclick="browseFolder()">
+        <span class="btn-icon">📁</span> Select Folder
+      </button>
+      <div class="library-path-row">
+        <input type="text" id="library-path-input" placeholder="…or paste a folder path" spellcheck="false"/>
+        <button class="btn btn-secondary" onclick="setLibraryPathManual()">Open</button>
+      </div>
+    </div>
+    <div id="library-status" class="status-msg"></div>
+
+    <div class="library-breadcrumb" id="library-breadcrumb" style="display:none">
+      <button class="crumb-back" id="crumb-back" onclick="libraryGoUp()">‹ Back</button>
+      <span class="crumb-current" id="crumb-current"></span>
+    </div>
+
+    <div class="library-grid" id="library-grid"></div>
+    <div class="library-empty" id="library-empty">No folder selected yet.</div>
+  </section>
+
+  <!-- Subtitles (optional) -->
+  <section class="card" id="card-subtitles">
+    <h2>Subtitles <span class="optional-tag">optional</span></h2>
+    <p class="hint">Click Browse to pick a .srt file, or paste the full path manually.</p>
+    <div class="path-row">
+      <input type="text" id="subtitle-path" placeholder="e.g. C:\Movies\Inception.en.srt" spellcheck="false"/>
+      <button class="btn btn-secondary" onclick="browseSubtitle()">Browse</button>
+      <button class="btn btn-secondary" onclick="loadSubtitles()">Load</button>
+      <button class="btn btn-secondary" onclick="clearSubtitles()">Clear</button>
+    </div>
+    <div id="subtitle-status" class="status-msg"></div>
+  </section>
+
+  <!-- Share URL -->
+  <section class="card" id="card-share">
+    <h2>Share Watch URL</h2>
+    <p class="hint">Send this link to your friends. They need Tailscale running.</p>
+    <div class="url-row">
+      <input type="text" id="watch-url" value="{{ watch_url }}" readonly/>
+      <button class="btn btn-secondary" onclick="copyURL()">Copy</button>
+    </div>
+    <div id="copy-status" class="status-msg"></div>
+
+    {% if not tailscale_ip %}
+    <div class="warning-box">
+      ⚠️ Tailscale IP not detected automatically. If Tailscale is running, click Retry —
+      or find your IP with <code>tailscale ip -4</code> and enter it below.
+    </div>
+    <div class="url-row" style="margin-top:8px">
+      <button class="btn btn-secondary" onclick="retryTailscaleDetect()">↻ Retry detection</button>
+    </div>
+    <div class="url-row" style="margin-top:8px">
+      <input type="text" id="manual-ip-input" placeholder="e.g. 100.101.102.103" value="{{ manual_ip }}"/>
+      <button class="btn btn-secondary" onclick="saveManualIp()">Save IP</button>
+    </div>
+    <div id="tailscale-status" class="status-msg"></div>
+    {% endif %}
+  </section>
+
+  <!-- Viewers -->
+  <section class="card" id="card-viewers">
+    <h2>Viewers Connected</h2>
+    <div class="viewer-count"><span id="viewer-count">0</span> connected</div>
+    <div id="viewer-list" class="viewer-list"></div>
+  </section>
+
+  <!-- Controls -->
+  <section class="card" id="card-controls">
+    <h2>Playback Controls</h2>
+    <p class="hint" id="movie-loaded-name">No movie loaded yet.</p>
+
+    <div class="controls-row">
+      <button class="btn btn-play" id="btn-play" onclick="hostPlay()" disabled>▶ Play</button>
+      <button class="btn btn-pause" id="btn-pause" onclick="hostPause()" disabled>⏸ Pause</button>
+    </div>
+
+    <div class="timeline-wrap">
+      <span id="current-time">0:00</span>
+      <input type="range" id="timeline" min="0" max="100" value="0"
+             oninput="onTimelineDrag(this.value)"
+             onchange="onTimelineSeek(this.value)"
+             disabled/>
+      <span id="total-time">0:00</span>
+    </div>
+
+      <video id="host-video" src="/video" style="display:none" preload="metadata"
+         onloadedmetadata="onVideoLoaded()"
+         ontimeupdate="onTimeUpdate()">
+      <track id="host-track" kind="subtitles" src="/subtitles" srclang="en" label="Subtitles" default/>
+    </video>
+  </section>
+
+  <!-- Chat -->
+  <section class="card" id="card-chat">
+    <h2>💬 Chat</h2>
+    <div id="chat-messages" class="chat-messages"></div>
+    <div class="chat-input-row">
+      <input type="text" id="chat-input" placeholder="Say something..." maxlength="300"
+             onkeydown="if(event.key==='Enter') sendChat()"/>
+      <button class="btn btn-secondary" onclick="sendChat()">Send</button>
+    </div>
+  </section>
+
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
+<script>
+  const socket = io({
+    reconnection: true,
+    reconnectionAttempts: 10,
+    reconnectionDelay: 1500,
+    transports: ["polling", "websocket"],
+  });
+  socket.on("connect", () => console.log("[Socket] Connected:", socket.id));
+  socket.on("disconnect", (r) => console.warn("[Socket] Disconnected:", r));
+    socket.on("connect_error", (e) => console.error("[Socket] Error:", e.message));
+  socket.on("reconnect", () => {
+    console.log("[Socket] Reconnected — re-announcing state to viewers");
+    if (typeof movieLoaded !== "undefined" && movieLoaded) {
+      socket.emit("host_pause", { timestamp: video.currentTime });
+    }
+  });
+
+</script>
+<script src="/static/js/host.js"></script>
+</body>
+</html>

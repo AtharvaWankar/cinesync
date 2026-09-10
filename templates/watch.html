@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>CineSync — {{ movie_name }}</title>
+  <link rel="stylesheet" href="/static/css/style.css"/>
+</head>
+<body class="watch-body">
+
+<div class="bg-aurora">
+  <span class="blob blob-a"></span>
+  <span class="blob blob-b"></span>
+  <span class="blob blob-c"></span>
+</div>
+
+<div id="name-overlay" class="overlay">
+  <div class="overlay-box">
+    <div class="logo">🎬 CineSync</div>
+    <h2>Welcome to the Watch Party</h2>
+    <p>Enter your name so the host knows you've joined.</p>
+    <input type="text" id="viewer-name-input" placeholder="Your name" maxlength="30"
+           onkeydown="if(event.key==='Enter') joinParty()"/>
+    <button class="btn btn-primary" onclick="joinParty()">Join Party</button>
+  </div>
+</div>
+
+<div class="watch-container" id="watch-container" style="display:none">
+
+  <div class="video-wrap">
+    <video id="viewer-video" src="/video" preload="metadata">
+      {% if has_subtitles %}
+      <track kind="subtitles" src="/subtitles" srclang="en" label="Subtitles" default/>
+      {% endif %}
+      Your browser does not support HTML5 video.
+    </video>
+
+    <div class="viewer-controls">
+      <button class="ctrl-btn ctrl-btn--toggle" id="v-btn-toggle" onclick="viewerToggle()">▶</button>
+      <span id="v-current-time" class="time-display">0:00</span>
+      <input type="range" id="v-timeline" min="0" max="100" value="0" step="1"
+             oninput="onViewerTimelineDrag(this.value)"
+             onchange="onViewerTimelineSeek(this.value)"/>
+      <span id="v-total-time" class="time-display">0:00</span>
+      <button class="ctrl-btn ctrl-btn--stats" id="v-btn-stats" onclick="toggleStatsPanel()" title="Stats for nerds">ⓘ</button>
+      <div class="vol-wrap">
+        <span class="vol-icon" onclick="toggleMute()">🔊</span>
+        <div class="vol-slider-wrap">
+          <input type="range" id="v-volume" min="0" max="100" value="100" step="1"
+                 oninput="onVolumeChange(this.value)"/>
+        </div>
+        <div id="vol-toast" class="vol-toast"></div>
+      </div>
+    </div>
+
+    <div id="sync-overlay" class="sync-overlay" style="display:none">
+      <div class="spinner"></div>
+      <span>Syncing...</span>
+    </div>
+
+    <div id="stats-panel" class="stats-panel" style="display:none">
+      <div class="stats-panel-header">
+        <span>📊 Stats for Nerds</span>
+        <span class="stats-close" onclick="toggleStatsPanel()">✕</span>
+      </div>
+      <div class="stats-panel-body" id="stats-panel-body">
+        <div class="stats-loading">Loading…</div>
+      </div>
+    </div>
+  </div>
+
+  <aside class="sidebar" id="sidebar">
+
+    <button class="sidebar-toggle" id="sidebar-toggle" onclick="toggleSidebar()" title="Toggle chat">
+      <span id="toggle-icon">»</span>
+    </button>
+
+    <div class="sidebar-inner" id="sidebar-inner">
+      <div class="sidebar-header">
+        <span class="logo-small">🎬 CineSync</span>
+        <span id="viewer-count-badge">0 watching</span>
+      </div>
+
+      <div class="movie-title" id="movie-title">{{ movie_name }}</div>
+
+      <!-- Viewer list -->
+      <div class="viewer-section">
+        <div class="section-label">In this party</div>
+        <div id="viewer-list" class="viewer-list-side"></div>
+      </div>
+
+      <!-- Files section -->
+      <div class="files-section" id="files-section">
+        <div class="files-header" onclick="toggleFiles()">
+          <span class="section-label">Files</span>
+          <span class="files-chevron" id="files-chevron">▶</span>
+        </div>
+        <div class="files-body" id="files-body">
+          <div class="files-inner">
+            <div id="files-list" class="files-list">
+              <div class="files-empty">Load a movie to browse files</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Chat -->
+      <div class="chat-section">
+        <div class="section-label">Chat</div>
+        <div id="chat-messages" class="chat-messages"></div>
+        <div id="typing-indicator" class="typing-indicator"></div>
+        <div class="chat-input-row">
+          <input type="text" id="chat-input" placeholder="React..." maxlength="300"
+                 onkeydown="if(event.key==='Enter') sendChat()"
+                 oninput="onChatInput()"/>
+          <button class="btn btn-secondary btn-sm" onclick="sendChat()">→</button>
+        </div>
+      </div>
+    </div>
+
+  </aside>
+
+  <div id="seek-toast" class="seek-toast"></div>
+  <div id="sync-indicator" class="sync-indicator"></div>
+
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
+<script>
+  function toggleSidebar() {
+    const container = document.getElementById("watch-container");
+    const icon      = document.getElementById("toggle-icon");
+    const isCollapsed = container.classList.toggle("sidebar-collapsed");
+    icon.textContent = isCollapsed ? "«" : "»";
+  }
+
+  const socket = io({
+    reconnection: true,
+    reconnectionAttempts: 10,
+    reconnectionDelay: 1500,
+    transports: ["polling", "websocket"],
+  });
+  socket.on("connect", () => console.log("[Socket] Connected:", socket.id));
+  socket.on("disconnect", (r) => console.warn("[Socket] Disconnected:", r));
+  socket.on("connect_error", (e) => console.error("[Socket] Error:", e.message));
+</script>
+<script src="/static/js/viewer.js"></script>
+<script src="/static/js/stats.js"></script>
+</body>
+</html>
