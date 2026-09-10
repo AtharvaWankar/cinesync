@@ -73,7 +73,6 @@ def load_movie():
     state.party_active = True
     print(f"[MOVIE] Loaded: {path}")
 
-    # Broadcast to all viewers if party is already active
     socketio.emit("movie_changed", {
         "movie_name":    state.movie_name,
         "has_subtitles": state.subtitle_path is not None,
@@ -131,7 +130,6 @@ def browse_movie():
     state.party_active = True
     print(f"[MOVIE] Loaded: {path}")
 
-    # Broadcast to all viewers
     socketio.emit("movie_changed", {
         "movie_name":    state.movie_name,
         "has_subtitles": state.subtitle_path is not None,
@@ -164,6 +162,90 @@ def browse_subtitle():
     state.set_subtitle(path)
     print(f"[SUBS]  Loaded: {path}")
     return jsonify({"ok": True, "path": path})
+
+
+@app.route("/api/folder_contents")
+def folder_contents():
+    """Return video files and subfolders in the current movie's directory."""
+    if not state.movie_path:
+        return jsonify({"ok": False, "error": "No movie loaded."}), 400
+
+    # Allow navigating to a subfolder
+    subfolder = request.args.get("path", "")
+    base_dir  = os.path.dirname(state.movie_path)
+
+    if subfolder:
+        target = os.path.normpath(os.path.join(base_dir, subfolder))
+        # Security: never allow navigating above the base directory
+        if not target.startswith(base_dir):
+            return jsonify({"ok": False, "error": "Access denied."}), 403
+    else:
+        target = base_dir
+
+    try:
+        entries = os.scandir(target)
+        folders = []
+        files   = []
+
+        for entry in sorted(entries, key=lambda e: e.name.lower()):
+            if entry.is_dir():
+                folders.append({
+                    "name":     entry.name,
+                    "type":     "folder",
+                    "rel_path": os.path.relpath(entry.path, base_dir),
+                })
+            elif entry.is_file():
+                ext = os.path.splitext(entry.name)[1].lower()
+                if ext in SUPPORTED_FORMATS:
+                    files.append({
+                        "name":      entry.name,
+                        "type":      "file",
+                        "full_path": entry.path,
+                        "active":    entry.path == state.movie_path,
+                    })
+
+        # Show parent folder navigation if we're in a subfolder
+        parent = None
+        if target != base_dir:
+            parent = os.path.relpath(os.path.dirname(target), base_dir)
+            if parent == ".":
+                parent = ""
+
+        return jsonify({
+            "ok":      True,
+            "folders": folders,
+            "files":   files,
+            "current": os.path.basename(target),
+            "parent":  parent,
+        })
+
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/approve_episode", methods=["POST"])
+def approve_episode():
+    """Host approves a viewer's episode request — loads and broadcasts."""
+    data = request.get_json()
+    path = data.get("path", "").strip()
+
+    if not path or not os.path.isfile(path):
+        return jsonify({"ok": False, "error": "File not found."}), 400
+
+    ext = os.path.splitext(path)[1].lower()
+    if ext not in SUPPORTED_FORMATS:
+        return jsonify({"ok": False, "error": "Unsupported format."}), 400
+
+    state.set_movie(path)
+    state.party_active = True
+    print(f"[EPISODE] Approved: {path}")
+
+    socketio.emit("movie_changed", {
+        "movie_name":    state.movie_name,
+        "has_subtitles": state.subtitle_path is not None,
+    }, room="watch_party")
+
+    return jsonify({"ok": True, "movie_name": state.movie_name})
 
 
 @app.route("/subtitles")

@@ -75,7 +75,6 @@ def register_events(socketio: SocketIO):
             "viewers": state.viewers_with_timestamp(),
         }, room=ROOM)
 
-    # ── Movie changed — broadcast to all viewers ────────────────────────
     @socketio.on("movie_changed")
     def on_movie_changed(data):
         socketio.emit("movie_changed", {
@@ -83,6 +82,23 @@ def register_events(socketio: SocketIO):
             "has_subtitles": data.get("has_subtitles", False),
         }, room=ROOM)
         print(f"[MOVIE] Changed to: {data.get('movie_name')}")
+
+    # ── Episode request from viewer ────────────────────────────────────
+    @socketio.on("episode_request")
+    def on_episode_request(data):
+        """Viewer requests to switch episode — forward to host only."""
+        from flask import request as req
+        viewer_name = data.get("viewer_name", "Someone")
+        file_name   = data.get("file_name", "")
+        full_path   = data.get("full_path", "")
+        print(f"[EPISODE] {viewer_name} requested: {file_name}")
+        # Emit only to host (host is on localhost so its sid is in the room)
+        # We broadcast to whole room — host.js handles it, viewers ignore it
+        socketio.emit("episode_request", {
+            "viewer_name": viewer_name,
+            "file_name":   file_name,
+            "full_path":   full_path,
+        }, room=ROOM)
 
     @socketio.on("chat_message")
     def on_chat(data):

@@ -6,14 +6,14 @@ const vTotalTime   = document.getElementById("v-total-time");
 const btnToggle    = document.getElementById("v-btn-toggle");
 
 let viewerName  = "";
-let myColour    = "#e8e8f0"; // assigned by server on join
+let myColour    = "#e8e8f0";
 let isDragging  = false;
 let clickTimer  = null;
 let typingTimer = null;
 let isTyping    = false;
 const SYNC_TOLERANCE = 1.5;
 
-// ── Volume (local only, no sync) ───────────────────────────────────────
+// ── Volume ─────────────────────────────────────────────────────────────
 
 let lastVolume = 1;
 
@@ -48,14 +48,11 @@ function updateVolIcon(vol) {
   else                          icon.textContent = "🔊";
 }
 
-// ── Click to play/pause, double click to fullscreen ────────────────────
+// ── Click / double-click ───────────────────────────────────────────────
 
 video.addEventListener("click", () => {
   if (clickTimer) return;
-  clickTimer = setTimeout(() => {
-    viewerToggle();
-    clickTimer = null;
-  }, 220);
+  clickTimer = setTimeout(() => { viewerToggle(); clickTimer = null; }, 220);
 });
 
 video.addEventListener("dblclick", () => {
@@ -127,8 +124,6 @@ function joinParty() {
   document.getElementById("watch-container").style.display = "grid";
 }
 
-// ── Colour assigned by server ──────────────────────────────────────────
-
 socket.on("your_colour", (data) => {
   myColour = data.colour;
 });
@@ -156,14 +151,12 @@ function escHtml(str) {
   return str.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 }
 
-// ── Video metadata loaded ──────────────────────────────────────────────
+// ── Video metadata ─────────────────────────────────────────────────────
 
 video.addEventListener("loadedmetadata", () => {
   vTimeline.max = Math.floor(video.duration);
   vTotalTime.textContent = formatTime(video.duration);
 });
-
-// ── Timeline update while playing ─────────────────────────────────────
 
 video.addEventListener("timeupdate", () => {
   if (isDragging) return;
@@ -171,7 +164,7 @@ video.addEventListener("timeupdate", () => {
   vCurrentTime.textContent = formatTime(video.currentTime);
 });
 
-// ── Single toggle — emits same events host uses ────────────────────────
+// ── Playback ───────────────────────────────────────────────────────────
 
 function viewerToggle() {
   if (video.paused) {
@@ -195,7 +188,7 @@ function onViewerTimelineSeek(val) {
   socket.emit("host_seek", { timestamp: ts, name: viewerName || "Someone" });
 }
 
-// ── Progress reporting — every 1 second ───────────────────────────────
+// ── Progress reporting ─────────────────────────────────────────────────
 
 setInterval(() => {
   if (viewerName && !video.paused) {
@@ -209,29 +202,14 @@ function sendChat() {
   const input = document.getElementById("chat-input");
   const text  = input.value.trim();
   if (!text || !viewerName) return;
-
-  socket.emit("chat_message", {
-    name:   viewerName,
-    text:   text,
-    time:   nowTime(),
-    colour: myColour,
-  });
+  socket.emit("chat_message", { name: viewerName, text, time: nowTime(), colour: myColour });
   input.value = "";
-
-  if (isTyping) {
-    isTyping = false;
-    socket.emit("typing_stop", { name: viewerName });
-  }
+  if (isTyping) { isTyping = false; socket.emit("typing_stop", { name: viewerName }); }
 }
 
 function onChatInput() {
   if (!viewerName) return;
-
-  if (!isTyping) {
-    isTyping = true;
-    socket.emit("typing_start", { name: viewerName });
-  }
-
+  if (!isTyping) { isTyping = true; socket.emit("typing_start", { name: viewerName }); }
   clearTimeout(typingTimer);
   typingTimer = setTimeout(() => {
     isTyping = false;
@@ -254,11 +232,9 @@ function appendChat(name, text, time, colour) {
   box.scrollTop = box.scrollHeight;
 }
 
-// ── Chat history on join ───────────────────────────────────────────────
-
 socket.on("chat_history", (data) => {
   const box = document.getElementById("chat-messages");
-  box.innerHTML = ""; // clear first
+  box.innerHTML = "";
   data.messages.forEach(m => appendChat(m.name, m.text, m.time, m.colour));
 });
 
@@ -266,25 +242,15 @@ socket.on("chat_history", (data) => {
 
 const typingUsers = new Set();
 
-socket.on("user_typing", (data) => {
-  typingUsers.add(data.name);
-  updateTypingIndicator();
-});
-
-socket.on("user_stopped_typing", (data) => {
-  typingUsers.delete(data.name);
-  updateTypingIndicator();
-});
+socket.on("user_typing", (data) => { typingUsers.add(data.name); updateTypingIndicator(); });
+socket.on("user_stopped_typing", (data) => { typingUsers.delete(data.name); updateTypingIndicator(); });
 
 function updateTypingIndicator() {
   const el = document.getElementById("typing-indicator");
   if (!el) return;
-  if (typingUsers.size === 0) {
-    el.textContent = "";
-  } else {
-    const names = [...typingUsers].map(escHtml).join(", ");
-    el.textContent = `${names} ${typingUsers.size === 1 ? "is" : "are"} typing...`;
-  }
+  if (typingUsers.size === 0) { el.textContent = ""; return; }
+  const names = [...typingUsers].map(escHtml).join(", ");
+  el.textContent = `${names} ${typingUsers.size === 1 ? "is" : "are"} typing...`;
 }
 
 // ── Sync helpers ───────────────────────────────────────────────────────
@@ -293,27 +259,23 @@ function showSyncOverlay() { overlay.style.display = "flex"; }
 function hideSyncOverlay() { overlay.style.display = "none"; }
 
 function seekIfNeeded(ts) {
-  if (Math.abs(video.currentTime - ts) > SYNC_TOLERANCE) {
+  if (Math.abs(video.currentTime - ts) > SYNC_TOLERANCE)
     video.currentTime = ts;
-  }
 }
 
-// ── Socket: initial state on join ─────────────────────────────────────
+// ── Socket: sync state on join ─────────────────────────────────────────
 
 socket.on("sync_state", (data) => {
   video.currentTime = data.timestamp;
   setToggleBtn(data.is_playing);
-
   if (data.is_playing) {
-    video.play().catch(() => {
-      showJoinOverlay(data.timestamp);
-    });
+    video.play().catch(() => showJoinOverlay(data.timestamp));
   }
 });
 
 function showJoinOverlay(timestamp) {
-  const overlay = document.getElementById("sync-overlay");
-  overlay.innerHTML = `
+  const ov = document.getElementById("sync-overlay");
+  ov.innerHTML = `
     <div class="join-start-box" onclick="onJoinClick()">
       <div style="font-size:36px">▶</div>
       <div style="font-size:14px; margin-top:8px">Click to join the party</div>
@@ -322,19 +284,19 @@ function showJoinOverlay(timestamp) {
       </div>
     </div>
   `;
-  overlay.style.display = "flex";
+  ov.style.display = "flex";
 }
 
 function onJoinClick() {
   video.play().then(() => {
-    const overlay = document.getElementById("sync-overlay");
-    overlay.innerHTML = `<div class="spinner"></div><span>Syncing...</span>`;
-    overlay.style.display = "none";
+    const ov = document.getElementById("sync-overlay");
+    ov.innerHTML = `<div class="spinner"></div><span>Syncing...</span>`;
+    ov.style.display = "none";
     setToggleBtn(true);
-  }).catch((e) => console.error("Play failed:", e));
+  }).catch(e => console.error(e));
 }
 
-// ── Socket: play / pause / seek from anyone ────────────────────────────
+// ── Socket: play / pause / seek ────────────────────────────────────────
 
 socket.on("sync_play", (data) => {
   seekIfNeeded(data.timestamp);
@@ -356,58 +318,15 @@ socket.on("sync_seek", (data) => {
   showSeekToast(data.name, data.timestamp);
 });
 
-// ── Socket: subtitles updated by host ─────────────────────────────────
+// ── Subtitles ──────────────────────────────────────────────────────────
 
 socket.on("subtitles_updated", () => {
   const existing = video.querySelector("track");
   if (existing) existing.remove();
-
   const track = document.createElement("track");
-  track.kind    = "subtitles";
-  track.src     = "/subtitles?" + Date.now();
-  track.srclang = "en";
-  track.label   = "Subtitles";
-  track.default = true;
+  track.kind = "subtitles"; track.src = "/subtitles?" + Date.now();
+  track.srclang = "en"; track.label = "Subtitles"; track.default = true;
   video.appendChild(track);
-});
-
-// ── Movie changed by host ──────────────────────────────────────────────
-
-socket.on("movie_changed", (data) => {
-  // Reset video to fresh state
-  video.pause();
-  video.src = "/video?" + Date.now(); // cache-bust
-  video.load();
-
-  // Reset timeline UI
-  vTimeline.value = 0;
-  vTimeline.max   = 100;
-  vCurrentTime.textContent = "0:00";
-  vTotalTime.textContent   = "0:00";
-
-  // Reset toggle button
-  setToggleBtn(false);
-
-  // Update movie title in sidebar
-  const titleEl = document.getElementById("movie-title");
-  if (titleEl) titleEl.textContent = data.movie_name;
-
-  // Handle subtitle track
-  const existing = video.querySelector("track");
-  if (existing) existing.remove();
-
-  if (data.has_subtitles) {
-    const track = document.createElement("track");
-    track.kind    = "subtitles";
-    track.src     = "/subtitles?" + Date.now();
-    track.srclang = "en";
-    track.label   = "Subtitles";
-    track.default = true;
-    video.appendChild(track);
-  }
-
-  // Show toast so viewer knows something changed
-  showToastMessage(`▶ Now loading: ${data.movie_name}`);
 });
 
 // ── Subtitle delay ─────────────────────────────────────────────────────
@@ -416,34 +335,58 @@ let subtitleDelay = 0;
 
 function applySubtitleDelay(delta) {
   subtitleDelay += delta;
-
   const trackEl = video.querySelector("track");
   if (!trackEl || !trackEl.track) return;
-
   const track = trackEl.track;
   track.mode = "hidden";
-
   const cues = track.cues;
-  if (!cues || cues.length === 0) {
-    track.mode = "showing";
-    showSubtitleToast();
-    return;
-  }
-
-  for (let i = 0; i < cues.length; i++) {
-    cues[i].startTime += delta;
-    cues[i].endTime   += delta;
-  }
-
+  if (!cues || cues.length === 0) { track.mode = "showing"; showSubtitleToast(); return; }
+  for (let i = 0; i < cues.length; i++) { cues[i].startTime += delta; cues[i].endTime += delta; }
   track.mode = "showing";
   showSubtitleToast();
 }
 
 function showSubtitleToast() {
-  const ms   = Math.round(subtitleDelay * 1000);
-  const sign = ms >= 0 ? "+" : "";
-  showToastMessage(`Subtitle delay: ${sign}${ms}ms`);
+  const ms = Math.round(subtitleDelay * 1000);
+  showToastMessage(`Subtitle delay: ${ms >= 0 ? "+" : ""}${ms}ms`);
 }
+
+// ── Movie changed ──────────────────────────────────────────────────────
+
+socket.on("movie_changed", (data) => {
+  video.pause();
+  video.src = "/video?" + Date.now();
+  video.load();
+
+  vTimeline.value = 0;
+  vTimeline.max   = 100;
+  vCurrentTime.textContent = "0:00";
+  vTotalTime.textContent   = "0:00";
+
+  setToggleBtn(false);
+
+  const titleEl = document.getElementById("movie-title");
+  if (titleEl) titleEl.textContent = data.movie_name;
+
+  const existing = video.querySelector("track");
+  if (existing) existing.remove();
+
+  if (data.has_subtitles) {
+    const track = document.createElement("track");
+    track.kind = "subtitles"; track.src = "/subtitles?" + Date.now();
+    track.srclang = "en"; track.label = "Subtitles"; track.default = true;
+    video.appendChild(track);
+  }
+
+  showToastMessage(`▶ Now loading: ${data.movie_name}`);
+
+  // Refresh file list if open
+  const filesBody = document.getElementById("files-body");
+  if (filesBody && filesBody.classList.contains("files-open")) {
+    currentRelPath = "";
+    loadFolderContents();
+  }
+});
 
 // ── Toast helper ───────────────────────────────────────────────────────
 
@@ -462,12 +405,11 @@ function showSeekToast(name, timestamp) {
   showToastMessage(`${name} jumped to ${formatTime(timestamp)}`);
 }
 
-// ── Socket: viewer list + chat ─────────────────────────────────────────
+// ── Viewer list ────────────────────────────────────────────────────────
 
 socket.on("viewer_update", (data) => {
   document.getElementById("viewer-count-badge").textContent = `${data.count} watching`;
   const list = document.getElementById("viewer-list");
-
   let anyoneOutOfSync = false;
 
   list.innerHTML = data.viewers.map(v => {
@@ -482,10 +424,7 @@ socket.on("viewer_update", (data) => {
   }).join("");
 
   const indicator = document.getElementById("sync-indicator");
-  if (indicator) {
-    const show = anyoneOutOfSync && document.fullscreenElement;
-    indicator.classList.toggle("visible", show);
-  }
+  if (indicator) indicator.classList.toggle("visible", anyoneOutOfSync && !!document.fullscreenElement);
 });
 
 socket.on("chat_message", (data) => {
@@ -495,11 +434,8 @@ socket.on("chat_message", (data) => {
 // ── Video buffering events ─────────────────────────────────────────────
 
 video.addEventListener("waiting", () => showSyncOverlay());
-video.addEventListener("playing", () => {
-  setToggleBtn(true);
-  hideSyncOverlay();
-});
-video.addEventListener("pause", () => setToggleBtn(false));
+video.addEventListener("playing", () => { setToggleBtn(true); hideSyncOverlay(); });
+video.addEventListener("pause",   () => setToggleBtn(false));
 video.addEventListener("canplay", () => hideSyncOverlay());
 
 // ── Heartbeat ──────────────────────────────────────────────────────────
@@ -545,7 +481,8 @@ socket.on("join_rejected", (data) => {
   `;
 });
 
-// ── Scroll wheel volume control ────────────────────────────────────────
+// ── Scroll wheel volume ────────────────────────────────────────────────
+
 video.addEventListener("wheel", (e) => {
   e.preventDefault();
   const step = 0.05;
@@ -559,6 +496,7 @@ video.addEventListener("wheel", (e) => {
 }, { passive: false });
 
 // ── Volume toast ───────────────────────────────────────────────────────
+
 let volToastTimer = null;
 
 function showVolToast(vol) {
@@ -570,4 +508,85 @@ function showVolToast(vol) {
   toast.classList.add("visible");
   if (volToastTimer) clearTimeout(volToastTimer);
   volToastTimer = setTimeout(() => toast.classList.remove("visible"), 1500);
+}
+
+// ── Files panel ────────────────────────────────────────────────────────
+
+let currentRelPath = "";
+
+function toggleFiles() {
+  const body    = document.getElementById("files-body");
+  const chevron = document.getElementById("files-chevron");
+  const isOpen  = body.classList.toggle("files-open");
+  chevron.textContent = isOpen ? "▼" : "▶";
+  if (isOpen) loadFolderContents();
+}
+
+async function loadFolderContents(relPath) {
+  if (relPath !== undefined) currentRelPath = relPath;
+
+  const list = document.getElementById("files-list");
+  list.innerHTML = `<div class="files-empty">Loading...</div>`;
+
+  try {
+    const url = currentRelPath
+      ? `/api/folder_contents?path=${encodeURIComponent(currentRelPath)}`
+      : "/api/folder_contents";
+
+    const res  = await fetch(url);
+    const data = await res.json();
+
+    if (!data.ok) {
+      list.innerHTML = `<div class="files-empty">${escHtml(data.error)}</div>`;
+      return;
+    }
+
+    list.innerHTML = "";
+
+    // Back button if in subfolder
+    if (data.parent !== null && data.parent !== undefined) {
+      const back = document.createElement("div");
+      back.className = "file-item file-folder";
+      back.innerHTML = `<span class="file-icon">←</span><span class="file-name">.. Back</span>`;
+      back.onclick = () => loadFolderContents(data.parent);
+      list.appendChild(back);
+    }
+
+    // Folders
+    data.folders.forEach(f => {
+      const el = document.createElement("div");
+      el.className = "file-item file-folder";
+      el.innerHTML = `<span class="file-icon">📁</span><span class="file-name">${escHtml(f.name)}</span>`;
+      el.onclick = () => loadFolderContents(f.rel_path);
+      list.appendChild(el);
+    });
+
+    // Files
+    data.files.forEach(f => {
+      const el = document.createElement("div");
+      el.className = `file-item file-video${f.active ? " file-active" : ""}`;
+      el.innerHTML = `<span class="file-icon">${f.active ? "▶" : "🎬"}</span><span class="file-name">${escHtml(f.name)}</span>`;
+      if (!f.active) {
+        el.onclick = () => requestEpisode(f.full_path, f.name);
+      }
+      list.appendChild(el);
+    });
+
+    if (data.folders.length === 0 && data.files.length === 0) {
+      list.innerHTML = `<div class="files-empty">No video files here</div>`;
+    }
+
+  } catch (e) {
+    list.innerHTML = `<div class="files-empty">Failed to load files</div>`;
+  }
+}
+
+function requestEpisode(fullPath, fileName) {
+  if (!viewerName) return;
+  socket.emit("episode_request", {
+    viewer_name: viewerName,
+    file_name:   fileName,
+    full_path:   fullPath,
+  });
+  showToastMessage(`📺 Requested: ${fileName}`);
 }
