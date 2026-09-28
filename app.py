@@ -434,12 +434,8 @@ def api_duration():
     if not state.movie_path:
         return jsonify({"ok": False, "error": "No movie loaded."}), 400
     try:
-        from server.mediainfo import probe
-        info = probe(state.movie_path)
-        # duration is stored in the format section of the raw probe
-        # re-run a lightweight probe just for duration
-        import subprocess, json as _json
         from server.mediainfo import FFPROBE
+        import subprocess, json as _json
         if not FFPROBE:
             return jsonify({"ok": False, "error": "ffprobe not available."}), 500
         result = subprocess.run(
