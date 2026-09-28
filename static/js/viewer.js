@@ -154,6 +154,13 @@ socket.on("your_colour", (data) => {
   myColour = data.colour;
 });
 
+socket.on("reconnect", () => {
+  // Re-announce ourselves to get a fresh sync_state snapshot
+  if (viewerName) {
+    socket.emit("viewer_join", { name: viewerName });
+  }
+});
+
 // ── Utilities ──────────────────────────────────────────────────────────
 
 function formatTime(secs) {
@@ -220,7 +227,8 @@ setInterval(() => {
   if (viewerName && !video.paused && video.readyState >= 2) {
     socket.emit("viewer_progress", { timestamp: video.currentTime });
   }
-}, 1000);
+}, 250);
+
 
 // ── Chat ───────────────────────────────────────────────────────────────
 
@@ -326,11 +334,22 @@ function onJoinClick() {
 
 socket.on("sync_play", (data) => {
   seekIfNeeded(data.timestamp);
-  video.play().then(() => {
+  // Don't call play() if already playing — a redundant play() mid-buffer
+  // returns a rejected promise and triggers the sync overlay incorrectly
+  if (video.paused) {
+    video.play().then(() => {
+      setToggleBtn(true);
+      hideSyncOverlay();
+    }).catch(() => {
+      // Play was blocked (e.g. autoplay policy) — show overlay so user can click to resume
+      showJoinOverlay(data.timestamp);
+    });
+  } else {
     setToggleBtn(true);
     hideSyncOverlay();
-  }).catch(() => showSyncOverlay());
+  }
 });
+
 
 socket.on("sync_pause", (data) => {
   video.pause();

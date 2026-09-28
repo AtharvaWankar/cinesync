@@ -76,10 +76,17 @@ def register_events(socketio: SocketIO):
         from flask import request as req
         ts = float(data.get("timestamp", 0))
         state.update_viewer_timestamp(req.sid, ts)
-        socketio.emit("viewer_update", {
-            "count":   state.viewer_count(),
-            "viewers": state.viewers_with_timestamp(),
-        }, room=ROOM)
+        # Only broadcast viewer_update every ~1s regardless of how often
+        # progress ticks arrive — avoids 8 broadcasts/sec at 250ms interval
+        import time
+        now = time.monotonic()
+        if now - state.last_viewer_broadcast >= 0.9:
+            state.last_viewer_broadcast = now
+            socketio.emit("viewer_update", {
+                "count":   state.viewer_count(),
+                "viewers": state.viewers_with_timestamp(),
+            }, room=ROOM)
+
 
     # NOTE: on_movie_changed handler removed — app.py emits movie_changed
     # directly, so a socket handler here would cause a double broadcast.

@@ -1,14 +1,8 @@
-/**
- * socket-client.js
- * Loaded on both host.html and watch.html.
- * Creates a global `socket` connected to the server.
- */
-
 const socket = io({
   reconnection: true,
   reconnectionAttempts: 10,
   reconnectionDelay: 1500,
-  transports: ["websocket"],
+  transports: ["polling", "websocket"],  // polling fallback prevents event burst on WS stall
 });
 
 socket.on("connect", () => {

@@ -30,6 +30,8 @@ class PartyState:
         self._used_colours = []
         self.manual_tailscale_ip = None
         self.library_root  = None
+        self.last_viewer_broadcast = 0.0  # monotonic time of last viewer_update broadcast
+
 
     # ── Network override ──────────────────────────────────────────────
     def set_manual_ip(self, ip: str | None):
