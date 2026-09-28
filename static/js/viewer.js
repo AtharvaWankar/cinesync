@@ -197,6 +197,16 @@ video.addEventListener("timeupdate", () => {
   vCurrentTime.textContent = formatTime(video.currentTime);
 });
 
+// Transcode streams take ~300ms to start — suppress stalled warnings
+// during that window so the UI doesn't flash an error unnecessarily.
+let _transcodeStarting = false;
+video.addEventListener("loadstart", () => { _transcodeStarting = true; });
+video.addEventListener("canplay",   () => { _transcodeStarting = false; });
+video.addEventListener("stalled",   () => {
+  if (!_transcodeStarting) showSyncOverlay();
+});
+
+
 // ── Playback ───────────────────────────────────────────────────────────
 
 function viewerToggle() {

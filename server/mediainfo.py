@@ -54,6 +54,44 @@ def _find_ffprobe() -> str | None:
 
 
 FFPROBE = _find_ffprobe()
+def _find_ffmpeg() -> str | None:
+    """Find the ffmpeg binary — same install location as ffprobe."""
+    found = shutil.which("ffmpeg")
+    if found:
+        return found
+
+    candidates = []
+    if platform.system() == "Windows":
+        exe = "ffmpeg.exe"
+        local = os.environ.get("LOCALAPPDATA", "")
+        candidates = [
+            r"C:\ffmpeg\bin\ffmpeg.exe",
+            r"C:\Program Files\ffmpeg\bin\ffmpeg.exe",
+            r"C:\Program Files (x86)\ffmpeg\bin\ffmpeg.exe",
+            os.path.expanduser(r"~\scoop\shims\ffmpeg.exe"),
+            os.path.expanduser(r"~\AppData\Local\Programs\ffmpeg\bin\ffmpeg.exe"),
+        ]
+        winget_root = os.path.join(local, "Microsoft", "WinGet", "Packages")
+        if os.path.isdir(winget_root):
+            for entry in os.listdir(winget_root):
+                if "ffmpeg" in entry.lower():
+                    for root, _dirs, files in os.walk(os.path.join(winget_root, entry)):
+                        if exe in files:
+                            candidates.append(os.path.join(root, exe))
+    else:
+        candidates = [
+            "/usr/bin/ffmpeg", "/usr/local/bin/ffmpeg",
+            "/opt/homebrew/bin/ffmpeg", "/snap/bin/ffmpeg",
+        ]
+
+    for c in candidates:
+        if c and os.path.isfile(c):
+            return c
+    return None
+
+
+FFMPEG = _find_ffmpeg()
+
 
 _cache_lock = threading.Lock()
 _cache = {}   # path -> parsed info dict
@@ -192,10 +230,10 @@ def _bytes_to_bitrate_str(bits_per_sec) -> str | None:
 
 
 def redetect() -> bool:
-    """Re-scan for ffprobe without restarting the server (e.g. user just
-    installed ffmpeg). Returns True if it's now available."""
-    global FFPROBE
+    """Re-scan for ffprobe/ffmpeg without restarting the server."""
+    global FFPROBE, FFMPEG
     FFPROBE = _find_ffprobe()
+    FFMPEG  = _find_ffmpeg()
     return FFPROBE is not None
 
 
