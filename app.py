@@ -428,6 +428,32 @@ def api_status():
         "has_subtitles": state.subtitle_path is not None,
     })
 
+@app.route("/api/duration")
+def api_duration():
+    """Return the duration of the currently loaded movie in seconds."""
+    if not state.movie_path:
+        return jsonify({"ok": False, "error": "No movie loaded."}), 400
+    try:
+        from server.mediainfo import probe
+        info = probe(state.movie_path)
+        # duration is stored in the format section of the raw probe
+        # re-run a lightweight probe just for duration
+        import subprocess, json as _json
+        from server.mediainfo import FFPROBE
+        if not FFPROBE:
+            return jsonify({"ok": False, "error": "ffprobe not available."}), 500
+        result = subprocess.run(
+            [FFPROBE, "-v", "quiet", "-print_format", "json",
+             "-show_entries", "format=duration", state.movie_path],
+            capture_output=True, text=True, timeout=10
+        )
+        data = _json.loads(result.stdout)
+        duration = float(data["format"]["duration"])
+        return jsonify({"ok": True, "duration": duration})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 
 def open_host_browser():
     import time

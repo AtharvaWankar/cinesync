@@ -322,8 +322,20 @@ async function clearSubtitles() {
 }
 
 function onVideoLoaded() {
-  timeline.max = Math.floor(video.duration);
-  totalTimeEl.textContent = formatTime(video.duration);
+  if (video.duration && isFinite(video.duration)) {
+    timeline.max = Math.floor(video.duration);
+    totalTimeEl.textContent = formatTime(video.duration);
+  } else {
+    fetch("/api/duration")
+      .then(r => r.json())
+      .then(data => {
+        if (data.ok && data.duration) {
+          timeline.max = Math.floor(data.duration);
+          totalTimeEl.textContent = formatTime(data.duration);
+        }
+      })
+      .catch(() => {});
+  }
 }
 
 function onTimeUpdate() {

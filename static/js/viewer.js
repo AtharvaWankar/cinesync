@@ -5,6 +5,8 @@ const vCurrentTime = document.getElementById("v-current-time");
 const vTotalTime   = document.getElementById("v-total-time");
 const btnToggle    = document.getElementById("v-btn-toggle");
 
+let knownDuration = 0;  // populated from /api/duration for transcoded streams
+
 let viewerName  = "";
 let myColour    = "#e8e8f0";
 let isDragging  = false;
@@ -187,8 +189,24 @@ function escHtml(str) {
 // ── Video metadata ─────────────────────────────────────────────────────
 
 video.addEventListener("loadedmetadata", () => {
-  vTimeline.max = Math.floor(video.duration);
-  vTotalTime.textContent = formatTime(video.duration);
+  if (video.duration && isFinite(video.duration)) {
+    // Browser knows the duration (raw stream) — use it directly
+    knownDuration = video.duration;
+    vTimeline.max = Math.floor(video.duration);
+    vTotalTime.textContent = formatTime(video.duration);
+  } else {
+    // Transcoded stream — browser gets Infinity or NaN; fetch from server
+    fetch("/api/duration")
+      .then(r => r.json())
+      .then(data => {
+        if (data.ok && data.duration) {
+          knownDuration = data.duration;
+          vTimeline.max = Math.floor(data.duration);
+          vTotalTime.textContent = formatTime(data.duration);
+        }
+      })
+      .catch(() => {});
+  }
 });
 
 video.addEventListener("timeupdate", () => {
@@ -514,7 +532,8 @@ document.addEventListener("keydown", (e) => {
     viewerToggle();
   } else if (e.key === "ArrowRight") {
     e.preventDefault();
-    const ts = Math.min(video.currentTime + 10, video.duration);
+    const cap = (isFinite(video.duration) && video.duration) ? video.duration : knownDuration;
+    const ts  = Math.min(video.currentTime + 10, cap || 999999);
     video.currentTime = ts;
     socket.emit("host_seek", { timestamp: ts, name: viewerName || "Someone" });
   } else if (e.key === "ArrowLeft") {
