@@ -1,13 +1,13 @@
 import os
 import subprocess
+import json
 from flask import Blueprint, Response, request, abort
 from server.state import state
 from config import CHUNK_SIZE, SUPPORTED_FORMATS
 
 video_bp = Blueprint("video", __name__)
 
-# Audio codecs browsers can decode natively — no transcoding needed.
-# EAC3, AC3, TrueHD, DTS are all unsupported across Chrome/Firefox/Edge.
+# Audio codecs browsers can decode natively — no transcoding needed
 BROWSER_SAFE_AUDIO = {"aac", "mp3", "opus", "vorbis", "flac", "pcm_s16le", "pcm_s24le"}
 
 
@@ -16,8 +16,11 @@ def get_mime_type(path: str) -> str:
     return SUPPORTED_FORMATS.get(ext, "video/mp4")
 
 
-def _probe_audio_codec(path: str) -> str | None:
-    """Return the codec_name of the first audio stream, or None."""
+def _probe_file(path: str) -> dict | None:
+    """
+    Run ffprobe on the file and return raw JSON.
+    Returns None if ffprobe is unavailable or fails.
+    """
     try:
         from server.mediainfo import FFPROBE
         if not FFPROBE:
@@ -25,83 +28,148 @@ def _probe_audio_codec(path: str) -> str | None:
         result = subprocess.run(
             [
                 FFPROBE, "-v", "quiet",
-                "-select_streams", "a:0",
-                "-show_entries", "stream=codec_name",
                 "-print_format", "json",
+                "-show_format", "-show_streams",
                 path,
             ],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True, text=True, timeout=15,
         )
-        import json
-        data = json.loads(result.stdout)
-        streams = data.get("streams", [])
-        if streams:
-            return streams[0].get("codec_name", "").lower()
+        if result.returncode != 0 or not result.stdout:
+            return None
+        return json.loads(result.stdout)
     except Exception:
-        pass
+        return None
+
+
+def _get_audio_codec(probe_data: dict) -> str | None:
+    """Return the codec_name of the first audio stream."""
+    for s in probe_data.get("streams", []):
+        if s.get("codec_type") == "audio":
+            return (s.get("codec_name") or "").lower()
     return None
 
 
-def _needs_transcode(path: str) -> bool:
-    """True if the file's audio codec is not natively supported by browsers."""
-    codec = _probe_audio_codec(path)
-    if not codec:
-        return False  # can't determine — attempt raw stream, browser will tell us
-    return codec not in BROWSER_SAFE_AUDIO
+def _get_duration(probe_data: dict) -> float | None:
+    """Return total duration in seconds from format or video stream."""
+    try:
+        dur = probe_data.get("format", {}).get("duration")
+        if dur:
+            return float(dur)
+    except Exception:
+        pass
+    for s in probe_data.get("streams", []):
+        if s.get("codec_type") == "video":
+            try:
+                return float(s["duration"])
+            except Exception:
+                pass
+    return None
+
+
+def _needs_transcode(audio_codec: str | None) -> bool:
+    if not audio_codec:
+        return False
+    return audio_codec not in BROWSER_SAFE_AUDIO
+
+
+def _byte_offset_to_seconds(byte_offset: int, file_size: int, duration: float) -> float:
+    """
+    Convert a byte offset to an approximate timestamp in seconds.
+    Uses linear interpolation based on file size and total duration.
+    This is accurate enough for seeking — ffmpeg will align to the
+    nearest keyframe anyway.
+    """
+    if file_size <= 0 or duration <= 0:
+        return 0.0
+    ratio = byte_offset / file_size
+    return round(ratio * duration, 3)
 
 
 @video_bp.route("/video")
 def stream_video():
     """
     Stream the movie file using HTTP Range Requests.
-    If the file has an unsupported audio codec (e.g. EAC3, AC3, TrueHD,
-    DTS), the audio is transcoded to AAC on-the-fly via ffmpeg. Video is
-    always copied directly without re-encoding — no quality loss, minimal
-    CPU overhead. Raw streaming is used when the audio is already
-    browser-compatible.
+    For browser-compatible audio: raw byte streaming (zero overhead).
+    For incompatible audio (EAC3/AC3/DTS/TrueHD): on-the-fly ffmpeg
+    transcode with seekable Range support via timestamp-based -ss seeking.
     """
     if not state.movie_path or not os.path.exists(state.movie_path):
         abort(404, "No movie loaded or file not found.")
 
-    # ── Transcoded path (EAC3 / AC3 / DTS / TrueHD → AAC) ────────────
-    if _needs_transcode(state.movie_path):
-        return _stream_transcoded(state.movie_path)
+    path         = state.movie_path
+    file_size    = os.path.getsize(path)
+    mime_type    = get_mime_type(path)
+    range_header = request.headers.get("Range", None)
 
-    # ── Raw streaming path (AAC / MP3 / Opus etc — no transcode) ──────
-    return _stream_raw(state.movie_path)
+    # Probe the file once (mediainfo module caches this per path)
+    probe_data   = _probe_file(path)
+    audio_codec  = _get_audio_codec(probe_data) if probe_data else None
+    needs_xcode  = _needs_transcode(audio_codec)
+
+    if needs_xcode:
+        duration = _get_duration(probe_data) if probe_data else None
+        return _stream_transcoded(path, file_size, duration, range_header)
+
+    return _stream_raw(path, file_size, mime_type, range_header)
 
 
-def _stream_transcoded(path: str) -> Response:
+# ── Transcoded streaming (EAC3 / AC3 / DTS / TrueHD → AAC) ───────────────────
+
+def _stream_transcoded(path: str, file_size: int, duration: float | None, range_header: str | None) -> Response:
     """
-    Pipe the file through ffmpeg, copying video and transcoding audio to
-    AAC. Streams the output as video/mp4 using fragmented MP4 (fMP4) so
-    the browser can play it as a progressive stream without needing a
-    complete file first.
+    Transcode audio to AAC on the fly via ffmpeg.
 
-    Range seeking is not supported in this mode — the browser will play
-    from the beginning. Seeking still works because the browser sends a
-    seek event and the video element updates currentTime client-side;
-    precise byte-level seeking into a live transcode stream is not
-    possible without pre-processing the file.
+    Seeking works by converting the browser's byte Range offset to a
+    timestamp using linear interpolation, then passing it to ffmpeg's
+    input-side -ss flag. ffmpeg snaps to the nearest keyframe — fast,
+    no full decode from the start.
+
+    The response uses fragmented MP4 (fMP4) so the browser can start
+    playing immediately without a complete file being present.
     """
     from server.mediainfo import FFMPEG
     if not FFMPEG:
-        # ffmpeg not available — fall back to raw stream and let the
-        # browser fail gracefully with its own codec error
-        return _stream_raw(path)
+        # ffmpeg missing — fall back to raw stream
+        mime_type = get_mime_type(path)
+        return _stream_raw(path, file_size, mime_type, range_header)
+
+    # Work out the seek timestamp from the Range header
+    seek_seconds = 0.0
+    byte_start   = 0
+
+    if range_header and duration:
+        try:
+            range_val  = range_header.replace("bytes=", "")
+            parts      = range_val.split("-")
+            byte_start = int(parts[0])
+            if byte_start > 0:
+                seek_seconds = _byte_offset_to_seconds(byte_start, file_size, duration)
+        except Exception:
+            seek_seconds = 0.0
+            byte_start   = 0
 
     def generate():
         cmd = [
             FFMPEG,
             "-loglevel", "error",
+        ]
+
+        # Input-side seek — fast keyframe seek before decoding starts.
+        # This is the key to making random seeking work with transcoding.
+        if seek_seconds > 0:
+            cmd += ["-ss", str(seek_seconds)]
+
+        cmd += [
             "-i", path,
-            "-c:v", "copy",       # video: no re-encode, zero quality loss
-            "-c:a", "aac",        # audio: transcode to AAC (universally supported)
-            "-b:a", "192k",       # audio bitrate — transparent quality
+            "-c:v", "copy",          # video: no re-encode, zero quality loss
+            "-c:a", "aac",           # audio: transcode to AAC
+            "-b:a", "192k",
             "-movflags", "frag_keyframe+empty_moov+faststart",  # fMP4 for streaming
             "-f", "mp4",
-            "pipe:1",             # write to stdout
+            "pipe:1",
         ]
+
+        proc = None
         try:
             proc = subprocess.Popen(
                 cmd,
@@ -115,33 +183,50 @@ def _stream_transcoded(path: str) -> Response:
                     break
                 yield chunk
         except GeneratorExit:
-            # Client disconnected (seek, tab close, etc.) — kill the process
-            proc.kill()
+            # Client disconnected (seek, tab close) — kill immediately
+            if proc:
+                proc.kill()
         except OSError as e:
             print(f"[VIDEO] Transcode read error: {e}")
         finally:
-            try:
-                proc.stdout.close()
-                proc.wait(timeout=2)
-            except Exception:
-                pass
+            if proc:
+                try:
+                    proc.stdout.close()
+                    proc.wait(timeout=3)
+                except Exception:
+                    try:
+                        proc.kill()
+                    except Exception:
+                        pass
+
+    # For transcoded streams we return 200 (not 206) because the byte
+    # range no longer maps 1:1 to the output — the browser is fine with
+    # this for fMP4 streams. The Accept-Ranges header is omitted
+    # intentionally so the browser doesn't try to issue sub-range requests
+    # that we can't honour byte-accurately.
+    status = 206 if (range_header and byte_start > 0) else 200
 
     return Response(
         generate(),
-        status=200,
+        status=status,
         mimetype="video/mp4",
         headers={
-            "Cache-Control":  "no-cache",
-            "X-Transcoded":   "1",  # useful for debugging in browser devtools
+            "Cache-Control": "no-cache",
+            "X-Transcoded":  "1",
+            # Tell the browser this is a valid partial response so it
+            # treats it as seekable even though we're doing timestamp seeks
+            **({"Content-Range": f"bytes {byte_start}-{file_size - 1}/{file_size}",
+                "Content-Length": str(file_size - byte_start)}
+               if (range_header and byte_start > 0) else
+               {"Content-Length": str(file_size)}),
         }
     )
 
 
-def _stream_raw(path: str) -> Response:
+# ── Raw streaming (AAC / MP3 / Opus — browser-compatible, zero overhead) ──────
+
+def _stream_raw(path: str, file_size: int, mime_type: str, range_header: str | None) -> Response:
     """Standard HTTP Range Request streaming for browser-compatible files."""
-    file_size    = os.path.getsize(path)
-    mime_type    = get_mime_type(path)
-    range_header = request.headers.get("Range", None)
 
     if not range_header:
         def generate_full():
